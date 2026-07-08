@@ -1,5 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { TrendingUp, Clock, History, Globe, Newspaper, Bot, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  TrendingUp,
+  Clock,
+  History,
+  Globe,
+  Newspaper,
+  Bot,
+  Activity,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { useAuthStore } from "../../services/store.tsx";
 import { useTradingStore } from "../../services/store.tsx";
 import {
@@ -14,6 +24,7 @@ import type {
   UpdateJournalEntryInput,
 } from "../../services/api/journal.ts";
 import type { Account, ClosedPosition, Order, Position } from "../../services/schemas.ts";
+import type { MappedBacktestResults } from "../../services/freqtrade/mappers.ts";
 import { Button } from "../../components/ui/button.tsx";
 import { TradeJournalPanel } from "../../components/TradingDialogs.tsx";
 import { AiTraderPanel } from "../AiTraderPage.tsx";
@@ -24,6 +35,11 @@ import { MOCK_EVENTS, MOCK_NEWS } from "./constants.ts";
 import { PositionsTable } from "./PositionsTable.tsx";
 import { OrdersTable } from "./OrdersTable.tsx";
 import { computeLivePnl, computeLivePrice } from "../../lib/livePnl.ts";
+import {
+  StrategyTesterPanel,
+  type BacktestRunStatus,
+  type TesterTab,
+} from "./StrategyTester/StrategyTesterPanel.tsx";
 
 type TradingActionError = {
   error?: { message?: string };
@@ -37,11 +53,19 @@ function getErrorMessage(error: unknown): string {
   return actionError.error?.message || actionError.message || "Request failed";
 }
 
+export type BottomPanelTab =
+  | "positions"
+  | "orders"
+  | "history"
+  | "journal"
+  | "calendar"
+  | "news"
+  | "ai-trader"
+  | "tester";
+
 export interface BottomPanelProps {
-  tab: "positions" | "orders" | "history" | "journal" | "calendar" | "news" | "ai-trader";
-  onTabChange: (
-    t: "positions" | "orders" | "history" | "journal" | "calendar" | "news" | "ai-trader",
-  ) => void;
+  tab: BottomPanelTab;
+  onTabChange: (t: BottomPanelTab) => void;
   positions: Position[];
   orders: Order[];
   accountId: string | null;
@@ -63,6 +87,24 @@ export interface BottomPanelProps {
    */
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  /**
+   * Strategy Tester tab content (plan U9). The design's bottom panel *is*
+   * the Strategy Tester — mounted here as an additional tab alongside
+   * Positions/Orders/Trade History so neither the existing live/paper
+   * trading views nor the tester lose a home. See the U9 report for the
+   * integration-choice rationale.
+   */
+  backtestResults?: MappedBacktestResults | null;
+  backtestStatus?: BacktestRunStatus;
+  /** 0-100 while `backtestStatus === "running"` — same value the toolbar's
+   *  "Run backtest" button renders as `NN%`. */
+  backtestProgress?: number;
+  backtestError?: string | null;
+  activeStrategyName?: string | null;
+  backtestSymbol?: string;
+  backtestTimeframe?: string;
+  backtestTimerange?: string | null;
+  isDark?: boolean;
 }
 
 export function BottomPanel({
@@ -85,7 +127,17 @@ export function BottomPanel({
   isFeedConnected = true,
   collapsed = false,
   onToggleCollapse,
+  backtestResults = null,
+  backtestStatus = "idle",
+  backtestProgress,
+  backtestError,
+  activeStrategyName = null,
+  backtestSymbol = "",
+  backtestTimeframe = "",
+  backtestTimerange = null,
+  isDark = true,
 }: BottomPanelProps) {
+  const [testerTab, setTesterTab] = useState<TesterTab>("overview");
   const isDemo = useAuthStore((s) => s.isDemo);
   const cancelOrder = useCancelOrder();
   const closePosition = useClosePosition();
@@ -188,7 +240,17 @@ export function BottomPanel({
     label: string;
     icon: typeof Clock;
     count?: number;
+    /** Text badge (e.g. running %) — takes priority over `count` when set. */
+    badge?: string;
+    badgeCls?: string;
   }[] = [
+    {
+      key: "tester",
+      label: "Strategy Tester",
+      icon: Activity,
+      badge: backtestStatus === "running" ? `${backtestProgress ?? 0}%` : undefined,
+      badgeCls: backtestStatus === "error" ? "bg-destructive text-destructive-foreground" : undefined,
+    },
     { key: "positions", label: "Positions", icon: TrendingUp, count: openPositions.length },
     { key: "orders", label: "Orders", icon: Clock, count: pendingOrders.length },
     { key: "history", label: "Trade History", icon: History },
@@ -219,10 +281,22 @@ export function BottomPanel({
             >
               <t.icon className="h-3 w-3" />
               <span className="hidden md:inline">{t.label}</span>
-              {t.count !== undefined && t.count > 0 && (
-                <span className="bg-primary text-primary-foreground rounded-full px-1.5 text-[9px]">
-                  {t.count}
+              {t.badge !== undefined ? (
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 text-[9px] font-mono tabular-nums",
+                    t.badgeCls ?? "bg-primary text-primary-foreground",
+                  )}
+                >
+                  {t.badge}
                 </span>
+              ) : (
+                t.count !== undefined &&
+                t.count > 0 && (
+                  <span className="bg-primary text-primary-foreground rounded-full px-1.5 text-[9px]">
+                    {t.count}
+                  </span>
+                )
               )}
             </button>
           ))}
@@ -269,6 +343,21 @@ export function BottomPanel({
       {/* Content */}
       {!collapsed && (
       <div className="flex-1 overflow-auto">
+        {tab === "tester" && (
+          <StrategyTesterPanel
+            results={backtestResults}
+            status={backtestStatus}
+            progress={backtestProgress}
+            error={backtestError}
+            strategyName={activeStrategyName}
+            symbol={backtestSymbol}
+            timeframe={backtestTimeframe}
+            timerange={backtestTimerange}
+            isDark={isDark}
+            tab={testerTab}
+            onTabChange={setTesterTab}
+          />
+        )}
         {tab === "positions" && (
           <PositionsTable
             positions={openPositions}

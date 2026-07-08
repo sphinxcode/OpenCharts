@@ -81,6 +81,33 @@ export function extractCurrencies(symbol: string): string[] {
   return [...new Set(found)];
 }
 
+/** `YYYYMMDD` for a UTC date — Freqtrade's `timerange` param format. */
+function toYyyymmdd(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
+}
+
+/**
+ * Default backtest `timerange` (plan U9): spans the currently-loaded candle
+ * history (`open of the first candle` -> `close of the last candle`) when any
+ * is loaded, else falls back to "last ~6 months ending today" so the "Run
+ * backtest" button always has something sane to send even before candles
+ * arrive. `candles[].time` is unix **seconds** (see `services/schemas.ts`).
+ */
+export function computeDefaultTimerange(candles: { time: number }[]): string {
+  const now = new Date();
+  if (candles.length > 0) {
+    const first = candles[0]!.time * 1000;
+    const last = candles[candles.length - 1]!.time * 1000;
+    return `${toYyyymmdd(new Date(first))}-${toYyyymmdd(new Date(last))}`;
+  }
+  const sixMonthsAgo = new Date(now);
+  sixMonthsAgo.setUTCMonth(sixMonthsAgo.getUTCMonth() - 6);
+  return `${toYyyymmdd(sixMonthsAgo)}-${toYyyymmdd(now)}`;
+}
+
 /** Return the candle-bucket start (unix seconds) for a given timestamp */
 export function getCandleBucketTime(timestampMs: number, tf: Timeframe): number {
   const SEC = 1000;

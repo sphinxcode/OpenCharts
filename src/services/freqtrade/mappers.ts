@@ -151,7 +151,40 @@ export interface RawTrade {
   close_date?: string;
   is_open?: boolean;
   exit_reason?: string;
+  /** VERIFIED (2026-07-08 live run) trade fields — see VERIFIED-API-CONTRACT.md
+   *  "Backtest result shape". `initial_stop_loss_ratio` is the fixed-R stop
+   *  distance (a negative fraction, e.g. -0.02) the exact avgRR/expR formulas
+   *  below divide into `profit_ratio`. */
+  is_short?: boolean;
+  open_rate?: number;
+  close_rate?: number;
+  initial_stop_loss_ratio?: number;
+  stop_loss_ratio?: number;
+  enter_tag?: string;
+  amount?: number;
+  /** Trade duration — Freqtrade's usual backtest export unit is minutes. */
+  trade_duration?: number;
   [key: string]: unknown;
+}
+
+/**
+ * Exact per-trade R multiple (KTD7, VERIFIED-API-CONTRACT.md "Exact avgRR"):
+ * `profit_ratio / abs(initial_stop_loss_ratio)`. Since the sample strategy's
+ * stoploss is a fixed 1R, this is exact — not the `expectancy_ratio` proxy.
+ * `undefined` when either field is missing/zero (older backend, or a trade
+ * that predates the fixed-R stop) so callers can fall back gracefully.
+ */
+export function perTradeR(t: RawTrade): number | undefined {
+  const stopRatio = t.initial_stop_loss_ratio;
+  const profitRatio = t.profit_ratio;
+  if (typeof stopRatio !== "number" || stopRatio === 0 || !Number.isFinite(stopRatio)) return undefined;
+  if (typeof profitRatio !== "number" || !Number.isFinite(profitRatio)) return undefined;
+  return profitRatio / Math.abs(stopRatio);
+}
+
+function mean(values: number[]): number | undefined {
+  if (values.length === 0) return undefined;
+  return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
 export interface RawResultsPerPair {
@@ -176,8 +209,14 @@ export interface RawStrategyResult {
   max_drawdown_account?: number;
   sharpe?: number;
   total_trades?: number;
-  /** KTD7 MVP fallback proxy for real per-trade R (not yet computed — U11). */
+  /** KTD7 MVP fallback proxy for real per-trade R — used only when no closed
+   *  winning trade carries a usable `initial_stop_loss_ratio` (U9 now prefers
+   *  the exact per-trade R computed via `perTradeR` inside `mapBacktestResult`). */
   expectancy_ratio?: number;
+  /** VERIFIED top-level fields (VERIFIED-API-CONTRACT.md). Properties tab
+   *  "Initial capital" + the equity-chart dashed baseline (U9). */
+  starting_balance?: number;
+  final_balance?: number;
   [key: string]: unknown;
 }
 
@@ -194,6 +233,8 @@ export interface EquityPoint {
 export interface MappedBacktestResults {
   net: number;
   netPct: number;
+  /** 0-100. Zero-trades-safe (KTD6/U9: no divide-by-zero). */
+  winRate: number;
   pf: number;
   maxdd: number;
   sharpe: number;
@@ -203,16 +244,32 @@ export interface MappedBacktestResults {
   draws: number;
   /** Cumulative `profit_abs`, sorted by `close_timestamp`, seeded 0 at the
    *  first `open_timestamp` — FreqUI's `CumProfitChart.vue` derivation
-   *  (KTD6; the backend has no equity-curve endpoint). */
+   *  (KTD6; the backend has no equity-curve endpoint). Absolute equity for
+   *  display is `startingBalance + point.value` (see `EquityChart.tsx`). */
   eqPts: EquityPoint[];
   /** Sum of `trades[].profit_abs` by sign (KTD6). `grossL` is negative. */
   grossW: number;
   grossL: number;
-  /** True until U11 (fixed-R exits) ships — `avgRR` below is
-   *  `expectancy_ratio`, a proxy, per KTD7's flagged MVP fallback. Render it
-   *  "approx" in the UI (U9), never as a silent real R multiple. */
+  /** True when the exact per-trade R (via `initial_stop_loss_ratio`) wasn't
+   *  computable for any closed winning trade and `avgRR` fell back to the
+   *  `expectancy_ratio` proxy (KTD7 MVP fallback). U9 renders this "approx"
+   *  and never treats it as a silent real R multiple. */
   avgRRApprox: boolean;
+  /** Mean per-trade R (`perTradeR`) over winning closed trades (VERIFIED
+   *  formula, supersedes the KTD7 approximation) — falls back to
+   *  `expectancy_ratio` only when no winner has a usable stop ratio. */
   avgRR: number | undefined;
+  /** Mean per-trade R over ALL closed trades (winners + losers) — the
+   *  Performance tab's "Expectancy (R)" stat. `undefined` when no closed
+   *  trade has a usable `initial_stop_loss_ratio` (added for U9; not part of
+   *  U8's original field set). */
+  expR: number | undefined;
+  /** `starting_balance` from the raw result, defaulted to 0 (added for U9 —
+   *  Properties "Initial capital" + the equity-chart dashed baseline; not
+   *  part of U8's original field set since nothing consumed it yet). */
+  startingBalance: number;
+  /** `final_balance` if the backend returned it, else `startingBalance + net`. */
+  finalEq: number;
   trades: RawTrade[];
 }
 
@@ -263,22 +320,47 @@ export function mapBacktestResult(
   const wins = totalsRow?.wins ?? closedTrades.filter((t) => (t.profit_abs ?? 0) > 0).length;
   const losses = totalsRow?.losses ?? closedTrades.filter((t) => (t.profit_abs ?? 0) < 0).length;
   const draws = totalsRow?.draws ?? closedTrades.filter((t) => (t.profit_abs ?? 0) === 0).length;
+  const total = s.total_trades ?? closedTrades.length;
+  const winRate = total > 0 ? (wins / total) * 100 : 0;
+
+  // Exact avgRR (VERIFIED-API-CONTRACT.md "Exact avgRR", supersedes KTD7's
+  // expectancy_ratio approximation): mean per-trade R over winning closed
+  // trades. Falls back to expectancy_ratio only when no winner has a usable
+  // `initial_stop_loss_ratio` (e.g. pre-fixed-R-stop backend data).
+  const winningTrades = closedTrades.filter((t) => (t.profit_abs ?? 0) > 0);
+  const exactAvgRR = mean(
+    winningTrades.map(perTradeR).filter((r): r is number => r !== undefined),
+  );
+  const avgRR = exactAvgRR ?? s.expectancy_ratio;
+  const avgRRApprox = exactAvgRR === undefined;
+
+  // Expectancy in R (Performance tab) — mean per-trade R over ALL closed
+  // trades (winners + losers), not just winners.
+  const expR = mean(closedTrades.map(perTradeR).filter((r): r is number => r !== undefined));
+
+  const net = s.profit_total_abs ?? 0;
+  const startingBalance = s.starting_balance ?? 0;
+  const finalEq = s.final_balance ?? startingBalance + net;
 
   return {
-    net: s.profit_total_abs ?? 0,
+    net,
     netPct: s.profit_total ?? 0,
+    winRate,
     pf: s.profit_factor ?? 0,
     maxdd: s.max_drawdown_account ?? s.max_drawdown ?? 0,
     sharpe: s.sharpe ?? 0,
-    total: s.total_trades ?? closedTrades.length,
+    total,
     wins,
     losses,
     draws,
     eqPts,
     grossW,
     grossL,
-    avgRRApprox: true,
-    avgRR: s.expectancy_ratio,
+    avgRRApprox,
+    avgRR,
+    expR,
+    startingBalance,
+    finalEq,
     trades,
   };
 }

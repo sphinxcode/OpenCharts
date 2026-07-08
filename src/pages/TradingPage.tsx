@@ -37,7 +37,7 @@ import { useTradingStore } from "../services/store.tsx";
 import { toast } from "../services/toast.ts";
 import { AiTraderPanel } from "./AiTraderPage.tsx";
 import { AddIndicatorModal } from "./trading/AddIndicatorModal.tsx";
-import { BottomPanel } from "./trading/BottomPanel.tsx";
+import { type BottomPanelTab, BottomPanel } from "./trading/BottomPanel.tsx";
 import { ChartPanel } from "./trading/ChartPanel.tsx";
 import { ChartToolbar } from "./trading/ChartToolbar.tsx";
 import {
@@ -53,9 +53,11 @@ import { DrawingToolRail } from "./trading/DrawingToolRail.tsx";
 import { MarketClosedBanner } from "./trading/MarketClosedBanner.tsx";
 import { type StrategyPanelTab, RightPanel } from "./trading/RightPanel.tsx";
 import { ReplayScrubber } from "./trading/ReplayScrubber.tsx";
+import type { BacktestRunStatus } from "./trading/StrategyTester/StrategyTesterPanel.tsx";
 import { useReplayChartData } from "./trading/useReplayChartData.ts";
 import { useReplayPlayback } from "./trading/useReplayPlayback.ts";
-import { getPipDigits } from "./trading/utils.ts";
+import { computeDefaultTimerange, getPipDigits } from "./trading/utils.ts";
+import type { MappedBacktestResults } from "../services/freqtrade/mappers.ts";
 
 type ErrorWithMessage = { message?: string };
 
@@ -157,9 +159,7 @@ export function TradingPage() {
     setActivePlugins(ids);
     updateChartPreferences({ activePlugins: ids });
   }, []);
-  const [bottomTab, setBottomTab] = useState<
-    "positions" | "orders" | "history" | "journal" | "calendar" | "news" | "ai-trader"
-  >("positions");
+  const [bottomTab, setBottomTab] = useState<BottomPanelTab>("positions");
   const { data: aiTraderEnabled } = useAiTraderEnabled();
   const [rightPanel, setRightPanel] = useState<
     StrategyPanelTab | "dom" | "news" | "ai-trader" | "tv-analysis"
@@ -476,12 +476,108 @@ export function TradingPage() {
     });
   }, []);
 
-  // Run backtest — no-op stub until plan U9 wires the Freqtrade POST +
-  // progress poll. `backtestProgress` stays undefined so the toolbar button
-  // renders its idle "▶ Run backtest" label.
-  const handleRunBacktest = useCallback(() => {
-    // TODO(U9): POST to the Freqtrade adapter and poll progress.
+  // Strategy Tester — Freqtrade backtest round-trip (plan U9). Load the
+  // active strategy name once (informational label + default backtest
+  // target); `getStrategies()` already tolerates a down/misconfigured
+  // backend by resolving to `[]` (see services/api.ts), so this never
+  // blocks boot.
+  const [activeStrategyName, setActiveStrategyName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getStrategies()
+      .then((list) => {
+        if (!cancelled && Array.isArray(list) && list.length > 0) {
+          setActiveStrategyName(list[0] ?? null);
+        }
+      })
+      .catch(() => {
+        // getStrategies() already swallows failures internally; this guards
+        // only against a genuinely unexpected throw.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const [backtestStatus, setBacktestStatus] = useState<BacktestRunStatus>("idle");
+  const [backtestProgress, setBacktestProgress] = useState<number | undefined>(undefined);
+  const [backtestResults, setBacktestResults] = useState<MappedBacktestResults | null>(null);
+  const [backtestError, setBacktestError] = useState<string | null>(null);
+  const [backtestTimerange, setBacktestTimerange] = useState<string | null>(null);
+  const backtestPollTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (backtestPollTimer.current != null) window.clearTimeout(backtestPollTimer.current);
+    },
+    [],
+  );
+
+  // Run backtest (toolbar ▶ button, plan U9): POST /backtest -> poll
+  // GET /backtest (progress 0..1 -> toolbar NN%) -> on completion, map the
+  // raw BacktestResult into the Strategy Tester's `results` shape and
+  // surface the tab. Errors and a zero-trades result both resolve to a
+  // rendered state, never a crash (mapBacktestResult is zero-trades-safe).
+  const handleRunBacktest = useCallback(() => {
+    if (backtestStatus === "running") return; // one run at a time
+    const strategyName = activeStrategyName ?? "RSIVolume";
+    const timerange = computeDefaultTimerange(candles);
+
+    setBacktestStatus("running");
+    setBacktestProgress(0);
+    setBacktestError(null);
+    setBacktestResults(null);
+    setBacktestTimerange(timerange);
+    setBottomTab("tester");
+    if (bottomPanelCollapsed) toggleBottomPanelCollapsed();
+
+    const poll = () => {
+      api
+        .pollBacktest()
+        .then((status) => {
+          const pct = Math.round(Math.max(0, Math.min(1, status.progress ?? 0)) * 100);
+          setBacktestProgress(pct);
+
+          if (!status.running && status.backtest_result) {
+            const mapped = api.mapBacktestResult(status.backtest_result, strategyName);
+            setBacktestResults(mapped);
+            setBacktestStatus("done");
+            setBacktestProgress(undefined);
+            return;
+          }
+          if (status.status === "error" || (!status.running && status.status_msg && !status.backtest_result)) {
+            setBacktestStatus("error");
+            setBacktestError(status.status_msg || "Backtest failed");
+            setBacktestProgress(undefined);
+            return;
+          }
+          backtestPollTimer.current = window.setTimeout(poll, 1500);
+        })
+        .catch((err: unknown) => {
+          setBacktestStatus("error");
+          setBacktestError(getErrorMessage(err));
+          setBacktestProgress(undefined);
+        });
+    };
+
+    api
+      .startBacktest({ strategy: strategyName, timeframe, timerange, enable_protections: false })
+      .then(() => {
+        backtestPollTimer.current = window.setTimeout(poll, 800);
+      })
+      .catch((err: unknown) => {
+        setBacktestStatus("error");
+        setBacktestError(getErrorMessage(err));
+        setBacktestProgress(undefined);
+      });
+  }, [
+    activeStrategyName,
+    candles,
+    timeframe,
+    backtestStatus,
+    bottomPanelCollapsed,
+    toggleBottomPanelCollapsed,
+  ]);
 
   // Strategy tab "Edit strategy source" — no-op stub until the indicator
   // Settings dialog (plan U7) exists to open.
@@ -548,6 +644,7 @@ export function TradingPage() {
           updateChartPreferences({ stayInDrawingMode: !chartPrefs.stayInDrawingMode })
         }
         onRunBacktest={handleRunBacktest}
+        backtestProgress={backtestProgress}
         isDark={isDark}
         onToggleTheme={handleToggleTheme}
         testerOpen={!bottomPanelCollapsed}
@@ -637,6 +734,15 @@ export function TradingPage() {
             collapsed={bottomPanelCollapsed}
             onToggleCollapse={toggleBottomPanelCollapsed}
             isFeedConnected={isFeedConnected}
+            backtestResults={backtestResults}
+            backtestStatus={backtestStatus}
+            backtestProgress={backtestProgress}
+            backtestError={backtestError}
+            activeStrategyName={activeStrategyName}
+            backtestSymbol={selectedSymbol}
+            backtestTimeframe={timeframe}
+            backtestTimerange={backtestTimerange}
+            isDark={isDark}
             journalEntries={journalData?.entries || []}
             journalLoading={journalLoading}
             onCreateJournal={(data: CreateJournalEntryInput) =>
