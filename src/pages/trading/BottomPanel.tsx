@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { TrendingUp, Clock, History, Globe, Newspaper, Bot } from "lucide-react";
+import { TrendingUp, Clock, History, Globe, Newspaper, Bot, ChevronDown, ChevronUp } from "lucide-react";
 import { useAuthStore } from "../../services/store.tsx";
 import { useTradingStore } from "../../services/store.tsx";
 import {
@@ -57,6 +57,12 @@ export interface BottomPanelProps {
   aiTraderEnabled?: boolean;
   height?: number;
   isFeedConnected?: boolean;
+  /**
+   * Design region 4 ("Strategy Tester") is collapsible — when true the panel
+   * shrinks to just its tab bar so the main chart pane reclaims the space.
+   */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export function BottomPanel({
@@ -77,6 +83,8 @@ export function BottomPanel({
   aiTraderEnabled,
   height = 220,
   isFeedConnected = true,
+  collapsed = false,
+  onToggleCollapse,
 }: BottomPanelProps) {
   const isDemo = useAuthStore((s) => s.isDemo);
   const cancelOrder = useCancelOrder();
@@ -193,59 +201,73 @@ export function BottomPanel({
   return (
     <div
       className="border-t border-border flex flex-col shrink-0 bg-card max-h-[150px] md:max-h-none"
-      style={{ height }}
+      style={{ height: collapsed ? 34 : height }}
     >
-      {/* Tab bar */}
-      <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-secondary text-xs overflow-x-auto no-scrollbar">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => onTabChange(t.key)}
-            className={cn(
-              "flex items-center gap-1 px-2.5 py-1 rounded shrink-0 whitespace-nowrap",
-              tab === t.key
-                ? "bg-card text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <t.icon className="h-3 w-3" />
-            <span className="hidden md:inline">{t.label}</span>
-            {t.count !== undefined && t.count > 0 && (
-              <span className="bg-primary text-primary-foreground rounded-full px-1.5 text-[9px]">
-                {t.count}
+      {/* Tab bar (+ collapse toggle, design region 4 "▾") */}
+      <div className="flex items-stretch border-b border-border bg-secondary">
+        <div className="flex flex-1 min-w-0 items-center gap-0.5 px-2 py-1 text-xs overflow-x-auto no-scrollbar">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => onTabChange(t.key)}
+              className={cn(
+                "flex items-center gap-1 px-2.5 py-1 rounded shrink-0 whitespace-nowrap",
+                tab === t.key
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <t.icon className="h-3 w-3" />
+              <span className="hidden md:inline">{t.label}</span>
+              {t.count !== undefined && t.count > 0 && (
+                <span className="bg-primary text-primary-foreground rounded-full px-1.5 text-[9px]">
+                  {t.count}
+                </span>
+              )}
+            </button>
+          ))}
+
+          {!collapsed && tab === "positions" && openPositions.length > 0 && (
+            <div className="ml-auto flex items-center gap-2">
+              <span className={cn("font-mono text-xs font-semibold", pnlClass(totalPnl))}>
+                P&L: {totalPnl >= 0 ? "+" : ""}
+                {formatCurrency(totalPnl)}
+              </span>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleCloseAll}
+                className="text-[10px] h-5"
+                disabled={closeAllPositions.isPending || isDemo || !isFeedConnected}
+              >
+                Close All
+              </Button>
+            </div>
+          )}
+
+          {!collapsed &&
+            activeAccount &&
+            (tab === "positions" || tab === "orders" || tab === "history") &&
+            !(tab === "positions" && openPositions.length > 0) && (
+              <span className="ml-auto text-[10px] text-muted-foreground font-mono px-2">
+                {activeAccount.label || accountId?.slice(0, 8)}
               </span>
             )}
+        </div>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title={collapsed ? "Expand" : "Collapse"}
+            className="shrink-0 flex items-center px-2 text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+          >
+            {collapsed ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
-        ))}
-
-        {tab === "positions" && openPositions.length > 0 && (
-          <div className="ml-auto flex items-center gap-2">
-            <span className={cn("font-mono text-xs font-semibold", pnlClass(totalPnl))}>
-              P&L: {totalPnl >= 0 ? "+" : ""}
-              {formatCurrency(totalPnl)}
-            </span>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleCloseAll}
-              className="text-[10px] h-5"
-              disabled={closeAllPositions.isPending || isDemo || !isFeedConnected}
-            >
-              Close All
-            </Button>
-          </div>
         )}
-
-        {activeAccount &&
-          (tab === "positions" || tab === "orders" || tab === "history") &&
-          !(tab === "positions" && openPositions.length > 0) && (
-            <span className="ml-auto text-[10px] text-muted-foreground font-mono px-2">
-              {activeAccount.label || accountId?.slice(0, 8)}
-            </span>
-          )}
       </div>
 
       {/* Content */}
+      {!collapsed && (
       <div className="flex-1 overflow-auto">
         {tab === "positions" && (
           <PositionsTable
@@ -294,6 +316,7 @@ export function BottomPanel({
         {tab === "news" && <NewsFeed />}
         {tab === "ai-trader" && <AiTraderPanel accountId={accountId} />}
       </div>
+      )}
     </div>
   );
 }

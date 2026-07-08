@@ -59,7 +59,6 @@ import {
   DrawingFloatingToolbar,
   DrawingSettingsDialog,
 } from "./DrawingToolsOverlay.tsx";
-import { DrawingToolRail } from "./DrawingToolRail.tsx";
 import { DRAWING_STYLES_EVENT, getStyleDefaults } from "./drawingStyles.ts";
 import { NewsOverlay } from "./NewsOverlay.tsx";
 import { ObjectTreePanel } from "./ObjectTreePanel.tsx";
@@ -2070,9 +2069,6 @@ export function ChartPanel({
 
       {/* Chart container — cursor is managed imperatively by DrawingToolsManager */}
       <div ref={containerRef} className="w-full h-full" onContextMenu={handleChartContextMenu} />
-
-      {/* Left vertical tool rail (TradingView-style grouped flyouts) */}
-      <DrawingToolRail drawingTool={drawingTool} onDrawingTool={(t) => onDrawingToolSelect?.(t)} />
     </div>
   );
 }

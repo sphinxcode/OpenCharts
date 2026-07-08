@@ -10,6 +10,28 @@ export type Timeframe = (typeof TIMEFRAMES)[number];
  */
 export const REPLAY_ENABLED = false;
 
+/**
+ * Fixed region sizes from the Trading Lab design
+ * (design_handoff_trading_lab/README.md §"Design Tokens" → "Layout constants").
+ * Tailwind can't read JS constants inside a className string, so consumers
+ * still hardcode the matching arbitrary-value classes (e.g. `h-12`, `w-[46px]`)
+ * — keep those in sync with this table by hand when either changes.
+ */
+export const LAYOUT = {
+  /** Top toolbar (ChartToolbar.tsx) height, px. */
+  toolbarHeight: 48,
+  /** Left drawing rail (DrawingToolRail.tsx) width, px. */
+  drawingRailWidth: 46,
+  /** Right panel (RightPanel.tsx) width, px. */
+  rightPanelWidth: 296,
+  /** Bottom Strategy-Tester / positions panel default height, px (collapsible). */
+  testerHeight: 300,
+  /** Main chart pane min-height, px — never crushed by the tester resize. */
+  mainChartMinHeight: 200,
+  /** Oscillator sub-pane ("below" indicators like RSI/MACD) height, px. */
+  oscillatorPaneHeight: 132,
+} as const;
+
 // Canvas-side colors for lightweight-charts (can't read CSS vars).
 // Trading Lab tokens — keep in sync with global.css (plan U1 / KTD9).
 export const CHART_COLORS = {

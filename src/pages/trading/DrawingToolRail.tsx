@@ -1,90 +1,41 @@
 import {
-  ArrowDownRight,
-  ArrowRight,
-  ArrowUpRight,
-  Circle,
-  Equal,
-  EyeOff,
-  GripVertical,
+  Eraser,
   Layers,
-  Layers3,
   type LucideIcon,
+  Magnet,
   Minus,
   MousePointer2,
   MoveUpRight,
-  MoveVertical,
-  PenTool,
-  Ruler,
-  Spline,
   Square,
   TrendingUp,
-  Triangle,
   Type,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { useDragOffset } from "../../hooks/useDragOffset.ts";
 import { cn } from "../../lib/utils.ts";
-import type { DrawingTool } from "./constants.ts";
+import type { DrawingTool, MagnetMode } from "./constants.ts";
 
-interface ToolMeta {
+interface RailTool {
   tool: DrawingTool;
   icon: LucideIcon;
   label: string;
 }
 
-interface ToolGroup {
-  id: string;
-  icon: LucideIcon;
-  label: string;
-  tools: ToolMeta[];
-}
-
-// TradingView-style left rail: tools grouped behind a flyout per category.
-const GROUPS: ToolGroup[] = [
-  {
-    id: "lines",
-    icon: TrendingUp,
-    label: "Lines",
-    tools: [
-      { tool: "trendline", icon: TrendingUp, label: "Trend Line" },
-      { tool: "ray", icon: MoveUpRight, label: "Ray" },
-      { tool: "extended", icon: Spline, label: "Extended Line" },
-      { tool: "horizontal", icon: Minus, label: "Horizontal Line" },
-      { tool: "vertical", icon: MoveVertical, label: "Vertical Line" },
-      { tool: "channel", icon: Equal, label: "Parallel Channel" },
-    ],
-  },
-  {
-    id: "fib",
-    icon: Layers,
-    label: "Fibonacci",
-    tools: [
-      { tool: "fibonacci", icon: Layers, label: "Fib Retracement" },
-      { tool: "fibextension", icon: Layers3, label: "Fib Extension" },
-    ],
-  },
-  {
-    id: "shapes",
-    icon: Square,
-    label: "Shapes",
-    tools: [
-      { tool: "rectangle", icon: Square, label: "Rectangle" },
-      { tool: "ellipse", icon: Circle, label: "Ellipse" },
-      { tool: "triangle", icon: Triangle, label: "Triangle" },
-      { tool: "arrow", icon: ArrowRight, label: "Arrow" },
-    ],
-  },
-  {
-    id: "trade",
-    icon: ArrowUpRight,
-    label: "Trade",
-    tools: [
-      { tool: "long-position", icon: ArrowUpRight, label: "Long Position" },
-      { tool: "short-position", icon: ArrowDownRight, label: "Short Position" },
-      { tool: "measure", icon: Ruler, label: "Measure" },
-    ],
-  },
-  { id: "text", icon: Type, label: "Text", tools: [{ tool: "text", icon: Type, label: "Text" }] },
+/**
+ * Flat vertical stack matching the Trading Lab design
+ * (design_handoff_trading_lab/README.md §"Screens" region 2): Cursor, Trend
+ * line, Horizontal, Ray, Rectangle, Fib retracement, Text, Eraser, divider,
+ * Magnet. Deeper tool variants (fib extension, parallel channel, ellipse,
+ * triangle, arrow, long/short position, measure, extended line, vertical
+ * line) stay reachable from the toolbar's "Drawing Tools" dropdown
+ * (ChartToolbar.tsx `DrawingToolsDropdown`) — this rail is the design's
+ * quick-access set only, not the full tool catalog.
+ */
+const RAIL_TOOLS: RailTool[] = [
+  { tool: "trendline", icon: TrendingUp, label: "Trend line" },
+  { tool: "horizontal", icon: Minus, label: "Horizontal line" },
+  { tool: "ray", icon: MoveUpRight, label: "Ray" },
+  { tool: "rectangle", icon: Square, label: "Rectangle" },
+  { tool: "fibonacci", icon: Layers, label: "Fib retracement" },
+  { tool: "text", icon: Type, label: "Text" },
 ];
 
 function RailButton({
@@ -104,135 +55,72 @@ function RailButton({
       title={title}
       onClick={onClick}
       className={cn(
-        "p-1.5 rounded hover:bg-secondary",
-        active ? "bg-primary/20 text-primary" : "text-muted-foreground",
+        "flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-md",
+        active
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground hover:bg-secondary hover:text-foreground",
       )}
     >
-      <Icon className="h-4 w-4" />
+      <Icon className="h-[17px] w-[17px]" strokeWidth={1.7} />
     </button>
   );
 }
 
-function RailGroup({
-  group,
-  activeTool,
-  open,
-  onToggle,
-  onSelect,
-}: {
-  group: ToolGroup;
-  activeTool: DrawingTool;
-  open: boolean;
-  onToggle: () => void;
-  onSelect: (t: DrawingTool) => void;
-}) {
-  const activeMeta = group.tools.find((t) => t.tool === activeTool);
-  const Icon = activeMeta?.icon ?? group.icon;
-  return (
-    <div className="relative">
-      <RailButton icon={Icon} title={group.label} active={Boolean(activeMeta)} onClick={onToggle} />
-      {open && (
-        <div className="absolute left-full top-0 ml-1 z-30 min-w-[180px] rounded-md bg-card border border-border shadow-xl py-1">
-          {group.tools.map((t) => (
-            <button
-              key={t.tool}
-              type="button"
-              onClick={() => onSelect(t.tool)}
-              className={cn(
-                "w-full flex items-center gap-2.5 px-3 py-1.5 text-sm hover:bg-secondary text-left",
-                activeTool === t.tool && "bg-secondary text-primary",
-              )}
-            >
-              <t.icon className="h-3.5 w-3.5 shrink-0" />
-              {t.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
+/**
+ * Left drawing rail — design region 2 (46px, `--panel` bg, 1px `--border`
+ * right). Docked as a fixed column by `TradingPage.tsx` (desktop only; on
+ * mobile the toolbar's own drawing-tool affordances are already hidden, so
+ * this rail follows the same `md:` breakpoint as the rest of the desktop
+ * chart chrome).
+ */
 export function DrawingToolRail({
   drawingTool,
   onDrawingTool,
+  magnetMode = "none",
+  onCycleMagnet,
+  onClearDrawings,
 }: {
   drawingTool: DrawingTool;
   onDrawingTool: (t: DrawingTool) => void;
+  magnetMode?: MagnetMode;
+  onCycleMagnet?: () => void;
+  onClearDrawings?: () => void;
 }) {
-  const [openGroup, setOpenGroup] = useState<string | null>(null);
-  const [hidden, setHidden] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const drag = useDragOffset();
-
-  useEffect(() => {
-    if (!openGroup) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpenGroup(null);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [openGroup]);
-
   const select = (t: DrawingTool) => {
     onDrawingTool(drawingTool === t ? "none" : t);
-    setOpenGroup(null);
   };
-
-  const hide = () => {
-    setOpenGroup(null);
-    setHidden(true);
-  };
-
-  // Collapsed: a small restorable button where the rail was last positioned.
-  if (hidden) {
-    return (
-      <button
-        type="button"
-        title="Show drawing tools"
-        onClick={() => setHidden(false)}
-        style={drag.style}
-        className="absolute left-1 top-1 z-20 rounded-md border border-border bg-card/90 p-1.5 text-muted-foreground backdrop-blur-sm hover:text-primary"
-      >
-        <PenTool className="h-4 w-4" />
-      </button>
-    );
-  }
 
   return (
-    <div
-      ref={ref}
-      style={drag.style}
-      className="absolute left-1 top-1 z-20 flex flex-col items-center gap-0.5 rounded-md bg-card/90 border border-border p-0.5 backdrop-blur-sm"
-    >
-      <div
-        onPointerDown={drag.onPointerDown}
-        title="Drag to move"
-        className="flex w-full cursor-move justify-center py-0.5 text-muted-foreground/50 hover:text-muted-foreground"
-      >
-        <GripVertical className="h-3.5 w-3.5" />
-      </div>
+    <div className="hidden md:flex w-[46px] shrink-0 flex-col items-center gap-0.5 border-r border-border bg-card py-2">
       <RailButton
         icon={MousePointer2}
         title="Cursor"
         active={drawingTool === "none"}
-        onClick={() => {
-          onDrawingTool("none");
-          setOpenGroup(null);
-        }}
+        onClick={() => onDrawingTool("none")}
       />
-      {GROUPS.map((g) => (
-        <RailGroup
-          key={g.id}
-          group={g}
-          activeTool={drawingTool}
-          open={openGroup === g.id}
-          onToggle={() => setOpenGroup((o) => (o === g.id ? null : g.id))}
-          onSelect={select}
+      {RAIL_TOOLS.map((t) => (
+        <RailButton
+          key={t.tool}
+          icon={t.icon}
+          title={t.label}
+          active={drawingTool === t.tool}
+          onClick={() => select(t.tool)}
         />
       ))}
-      <div className="my-0.5 w-full border-t border-border/50" />
-      <RailButton icon={EyeOff} title="Hide toolbar" onClick={hide} />
+      <RailButton icon={Eraser} title="Clear all drawings" onClick={() => onClearDrawings?.()} />
+      <div className="my-1 h-px w-[22px] bg-border" />
+      <RailButton
+        icon={Magnet}
+        title={
+          magnetMode === "strong"
+            ? "Magnet: strong"
+            : magnetMode === "weak"
+              ? "Magnet: weak"
+              : "Magnet: off"
+        }
+        active={magnetMode !== "none"}
+        onClick={() => onCycleMagnet?.()}
+      />
     </div>
   );
 }

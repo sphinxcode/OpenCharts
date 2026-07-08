@@ -40,19 +40,20 @@ import { ChartPanel } from "./trading/ChartPanel.tsx";
 import { ChartToolbar } from "./trading/ChartToolbar.tsx";
 import {
   type DrawingTool,
+  LAYOUT,
   type MagnetMode,
   REPLAY_ENABLED,
   TIMEFRAMES,
   type Timeframe,
 } from "./trading/constants.ts";
 import { DOMPanel } from "./trading/DOMPanel.tsx";
+import { DrawingToolRail } from "./trading/DrawingToolRail.tsx";
 import { MarketClosedBanner } from "./trading/MarketClosedBanner.tsx";
-import { OrderPanel } from "./trading/OrderPanel.tsx";
+import { type StrategyPanelTab, RightPanel } from "./trading/RightPanel.tsx";
 import { ReplayScrubber } from "./trading/ReplayScrubber.tsx";
 import { useReplayChartData } from "./trading/useReplayChartData.ts";
 import { useReplayPlayback } from "./trading/useReplayPlayback.ts";
 import { getPipDigits } from "./trading/utils.ts";
-import { WatchlistPanel } from "./trading/WatchlistPanel.tsx";
 
 type ErrorWithMessage = { message?: string };
 
@@ -146,15 +147,27 @@ export function TradingPage() {
   >("positions");
   const { data: aiTraderEnabled } = useAiTraderEnabled();
   const [rightPanel, setRightPanel] = useState<
-    "order" | "dom" | "watchlist" | "news" | "ai-trader" | "tv-analysis"
-  >("order");
+    StrategyPanelTab | "dom" | "news" | "ai-trader" | "tv-analysis"
+  >("strategy");
   const [showRightPanel, setShowRightPanel] = useState(true);
 
   // ── Vertical resize: chart vs bottom panel ──
   const [bottomPanelHeight, setBottomPanelHeight] = useState(() => {
     const saved = localStorage.getItem("bottomPanelHeight");
-    return saved ? parseInt(saved, 10) : 220;
+    return saved ? parseInt(saved, 10) : LAYOUT.testerHeight;
   });
+  // Strategy-Tester collapse (design region 4, toolbar ⊞ toggle) — the main
+  // chart pane reclaims the space via its own min-h-[200px] flex-1 clamp.
+  const [bottomPanelCollapsed, setBottomPanelCollapsed] = useState(
+    () => localStorage.getItem("bottomPanelCollapsed") === "true",
+  );
+  const toggleBottomPanelCollapsed = useCallback(() => {
+    setBottomPanelCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("bottomPanelCollapsed", String(next));
+      return next;
+    });
+  }, []);
   const resizingRef = useRef(false);
   const resizeStartY = useRef(0);
   const resizeStartH = useRef(0);
@@ -399,7 +412,38 @@ export function TradingPage() {
     [symbolInfo, selectedSymbol],
   );
 
-  const isDark = !document.documentElement.classList.contains("light");
+  // Theme toggle (design region 1, ☾/☀) — single source of truth for the
+  // `.light` class on <html>; nothing else in the app mutated this class
+  // before, so this both introduces and owns the toggle mechanism.
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved === "light") return false;
+    if (saved === "dark") return true;
+    return !document.documentElement.classList.contains("light");
+  });
+  useEffect(() => {
+    document.documentElement.classList.toggle("light", !isDark);
+  }, [isDark]);
+  const handleToggleTheme = useCallback(() => {
+    setIsDark((prev) => {
+      const next = !prev;
+      localStorage.setItem("theme", next ? "dark" : "light");
+      return next;
+    });
+  }, []);
+
+  // Run backtest — no-op stub until plan U9 wires the Freqtrade POST +
+  // progress poll. `backtestProgress` stays undefined so the toolbar button
+  // renders its idle "▶ Run backtest" label.
+  const handleRunBacktest = useCallback(() => {
+    // TODO(U9): POST to the Freqtrade adapter and poll progress.
+  }, []);
+
+  // Strategy tab "Edit strategy source" — no-op stub until the indicator
+  // Settings dialog (plan U7) exists to open.
+  const handleEditStrategy = useCallback(() => {
+    // TODO(U7): open IndicatorSettingsDialog for the strategy's instance.
+  }, []);
 
   // Mobile trading state
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
@@ -454,12 +498,26 @@ export function TradingPage() {
         onToggleStayInDrawingMode={() =>
           updateChartPreferences({ stayInDrawingMode: !chartPrefs.stayInDrawingMode })
         }
+        onRunBacktest={handleRunBacktest}
+        isDark={isDark}
+        onToggleTheme={handleToggleTheme}
+        testerOpen={!bottomPanelCollapsed}
+        onToggleTester={toggleBottomPanelCollapsed}
       />
 
       <MarketClosedBanner symbolInfo={symbolInfo} />
 
       {/* ── Main Layout ──────────────────────────────────── */}
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+        {/* Left drawing rail — design region 2, spans chart + tester */}
+        <DrawingToolRail
+          drawingTool={drawingTool}
+          onDrawingTool={setDrawingTool}
+          magnetMode={chartPrefs.magnetMode}
+          onCycleMagnet={cycleMagnetMode}
+          onClearDrawings={clearDrawings}
+        />
+
         {/* Chart + Bottom Panel */}
         <div className="flex flex-col flex-1 min-w-0">
           {/* Chart Area */}
@@ -527,6 +585,8 @@ export function TradingPage() {
             onSelectOrderSymbol={setSelectedSymbol}
             aiTraderEnabled={aiTraderEnabled?.enabled ?? false}
             height={bottomPanelHeight}
+            collapsed={bottomPanelCollapsed}
+            onToggleCollapse={toggleBottomPanelCollapsed}
             isFeedConnected={isFeedConnected}
             journalEntries={journalData?.entries || []}
             journalLoading={journalLoading}
@@ -560,60 +620,66 @@ export function TradingPage() {
           />
         </div>
 
-        {/* Right Panel */}
+        {/* Right Panel — design region 5, fixed 296px */}
         {showRightPanel && (
-          <div className="hidden md:flex w-full md:w-[280px] xl:w-[320px] border-t md:border-t-0 md:border-l border-border flex-col bg-card overflow-hidden shrink-0 md:max-h-none">
-            {rightPanel === "order" && (
-              <OrderPanel
-                symbol={selectedSymbol}
-                symbolInfo={symbolInfo}
-                tick={tick}
-                accountId={activeAccountId}
-                oneClick={oneClick}
-                onToggleOneClick={toggleOneClick}
-                onConfirmOrder={setConfirmOrder}
-                accountBalance={account?.balance}
-                isFeedConnected={isFeedConnected}
-                soundMuted={soundMuted}
-                onToggleMute={toggleSoundMute}
-                onOrderSuccess={() => {
-                  playTradeSound();
-                  handleFirstTrade();
+          <div className="hidden md:flex w-full md:w-[296px] border-t md:border-t-0 md:border-l border-border flex-col bg-card overflow-hidden shrink-0 md:max-h-none">
+            {rightPanel === "strategy" || rightPanel === "watchlist" || rightPanel === "order" ? (
+              <RightPanel
+                activeTab={rightPanel}
+                onTabChange={setRightPanel}
+                watchlist={{
+                  symbols,
+                  ticks,
+                  selectedSymbol,
+                  onSelect: setSelectedSymbol,
+                  oneClick,
+                  accountId: activeAccountId,
+                  isFeedConnected,
                 }}
+                order={{
+                  symbol: selectedSymbol,
+                  symbolInfo,
+                  tick,
+                  accountId: activeAccountId,
+                  oneClick,
+                  onToggleOneClick: toggleOneClick,
+                  onConfirmOrder: setConfirmOrder,
+                  accountBalance: account?.balance,
+                  isFeedConnected,
+                  soundMuted,
+                  onToggleMute: toggleSoundMute,
+                  onOrderSuccess: () => {
+                    playTradeSound();
+                    handleFirstTrade();
+                  },
+                }}
+                onEditStrategy={handleEditStrategy}
               />
-            )}
-            {rightPanel === "dom" && <DOMPanel symbol={selectedSymbol} tick={tick} />}
-            {rightPanel === "watchlist" && (
-              <WatchlistPanel
-                symbols={symbols}
-                ticks={ticks}
-                selectedSymbol={selectedSymbol}
-                onSelect={setSelectedSymbol}
-                oneClick={oneClick}
-                accountId={activeAccountId}
-                isFeedConnected={isFeedConnected}
-              />
-            )}
-            {rightPanel === "news" && (
-              <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                <MarketNewsFeed symbol={selectedSymbol} />
-              </div>
-            )}
-            {rightPanel === "ai-trader" && (
-              <div className="flex-1 overflow-hidden">
-                <AiTraderPanel accountId={activeAccountId} />
-              </div>
-            )}
-            {rightPanel === "tv-analysis" && (
-              <div className="flex-1 overflow-hidden">
-                <TradingViewTechnicalAnalysis
-                  symbol={selectedSymbol}
-                  theme={isDark ? "dark" : "light"}
-                  interval={timeframe}
-                  width="100%"
-                  height="100%"
-                />
-              </div>
+            ) : (
+              <>
+                {rightPanel === "dom" && <DOMPanel symbol={selectedSymbol} tick={tick} />}
+                {rightPanel === "news" && (
+                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                    <MarketNewsFeed symbol={selectedSymbol} />
+                  </div>
+                )}
+                {rightPanel === "ai-trader" && (
+                  <div className="flex-1 overflow-hidden">
+                    <AiTraderPanel accountId={activeAccountId} />
+                  </div>
+                )}
+                {rightPanel === "tv-analysis" && (
+                  <div className="flex-1 overflow-hidden">
+                    <TradingViewTechnicalAnalysis
+                      symbol={selectedSymbol}
+                      theme={isDark ? "dark" : "light"}
+                      interval={timeframe}
+                      width="100%"
+                      height="100%"
+                    />
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

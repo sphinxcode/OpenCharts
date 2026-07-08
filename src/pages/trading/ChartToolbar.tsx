@@ -105,6 +105,23 @@ export interface ChartToolbarProps {
   onCycleMagnet?: () => void;
   stayInDrawingMode?: boolean;
   onToggleStayInDrawingMode?: () => void;
+  /**
+   * Opens the Add-Indicator modal (design region 6, plan U6). Until that
+   * modal exists this is left unwired by `TradingPage.tsx`, so the button
+   * falls back to the legacy indicator dropdown below so indicator-adding
+   * functionality isn't lost in the interim.
+   */
+  onOpenIndicators?: () => void;
+  /** Kicks off an authoritative Freqtrade backtest run (plan U9). */
+  onRunBacktest: () => void;
+  /** 0-100 while a backtest is running; `undefined` renders the idle label. */
+  backtestProgress?: number;
+  /** Current theme, for the ☾/☀ toggle glyph. */
+  isDark: boolean;
+  onToggleTheme: () => void;
+  /** Whether the bottom Strategy-Tester / positions panel is expanded. */
+  testerOpen: boolean;
+  onToggleTester: () => void;
 }
 
 export function ChartToolbar({
@@ -138,6 +155,13 @@ export function ChartToolbar({
   onCycleMagnet,
   stayInDrawingMode = false,
   onToggleStayInDrawingMode,
+  onOpenIndicators,
+  onRunBacktest,
+  backtestProgress,
+  isDark,
+  onToggleTheme,
+  testerOpen,
+  onToggleTester,
 }: ChartToolbarProps) {
   const [showSymbolSearch, setShowSymbolSearch] = useState(false);
   const [symbolFilter, setSymbolFilter] = useState("");
@@ -156,13 +180,24 @@ export function ChartToolbar({
     : "--";
 
   return (
-    <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-card text-xs shrink-0 overflow-x-auto md:overflow-visible flex-nowrap md:flex-wrap no-scrollbar">
+    <div className="flex h-12 items-center gap-1 px-2 border-b border-border bg-card text-xs shrink-0 overflow-x-auto md:overflow-visible flex-nowrap md:flex-wrap no-scrollbar">
+      {/* Brand mark — design region 1 */}
+      <div className="flex items-center gap-2 pr-2.5 mr-0.5 border-r border-border shrink-0">
+        <div className="flex h-[22px] w-[22px] items-center justify-center rounded-md bg-primary text-[12px] font-bold text-primary-foreground">
+          ◪
+        </div>
+        <span className="hidden lg:inline text-sm font-bold tracking-tight">Trading Lab</span>
+      </div>
+
       {/* Symbol Selector — TradingView style */}
       <div className="relative shrink-0">
         <button
           onClick={() => setShowSymbolSearch((v) => !v)}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md hover:bg-secondary font-bold text-sm tracking-tight"
         >
+          <span className="hidden sm:flex h-4 w-4 items-center justify-center rounded-full bg-[#f7931a] text-[9px] font-bold text-white">
+            ₿
+          </span>
           {selectedSymbol}
           <ChevronDown className="h-3 w-3 opacity-60" />
         </button>
@@ -265,6 +300,19 @@ export function ChartToolbar({
         )}
       </div>
 
+      {/* Last price (mono, design region 1) — mid of bid/ask; no change% feed
+          wired yet, so the colored change badge is omitted rather than faked. */}
+      {tick && (
+        <div className="hidden sm:flex items-baseline gap-2 px-1 shrink-0">
+          <span className="font-mono text-[15px] font-semibold tabular-nums">
+            {formatNumber(
+              (tick.bid + tick.ask) / 2,
+              symbolInfo?.tickSize ? String(symbolInfo.tickSize).split(".")[1]?.length || 2 : 5,
+            )}
+          </span>
+        </div>
+      )}
+
       {/* Live Price — bid / ask badges like TradingView */}
       {tick && (
         <div className="flex items-center gap-1 md:gap-1.5 px-1.5 md:px-2 border-l border-r border-border shrink-0">
@@ -323,19 +371,22 @@ export function ChartToolbar({
 
       <div className="h-4 border-l border-border mx-1 hidden md:block" />
 
-      {/* Indicators */}
+      {/* Indicators — ƒx glyph, design region 1. Opens the Add-Indicator
+          modal (plan U6) once `onOpenIndicators` is wired; until then it
+          falls back to the legacy dropdown below it so the app keeps a
+          working indicator picker. */}
       {
         <div className="relative hidden md:block">
           <button
-            onClick={onToggleIndicatorMenu}
+            onClick={() => (onOpenIndicators ? onOpenIndicators() : onToggleIndicatorMenu())}
             className={cn(
-              "flex items-center gap-1 px-2 py-1 rounded text-xs",
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium",
               activeIndicators.length > 0
                 ? "bg-primary/20 text-primary"
-                : "hover:bg-secondary text-muted-foreground",
+                : "hover:bg-secondary text-foreground",
             )}
           >
-            <BarChart3 className="h-3 w-3" />
+            <span className="font-mono font-semibold text-primary">ƒx</span>
             Indicators
             {activeIndicators.length > 0 && (
               <span className="bg-primary text-primary-foreground rounded-full px-1 text-[9px]">
@@ -388,6 +439,43 @@ export function ChartToolbar({
       }
 
       <div className="flex-1 hidden md:block" />
+
+      {/* Run backtest — design region 1. Static/idle until plan U9 wires the
+          Freqtrade POST + progress poll; `backtestProgress` renders `NN%`
+          while a run is in flight. */}
+      <button
+        onClick={onRunBacktest}
+        className="hidden md:flex items-center gap-1.5 h-8 px-3 rounded-md bg-primary text-primary-foreground text-[13px] font-semibold shrink-0"
+      >
+        {backtestProgress !== undefined ? (
+          <span className="font-mono tabular-nums">{backtestProgress}%</span>
+        ) : (
+          <span>▶ Run backtest</span>
+        )}
+      </button>
+
+      {/* Theme toggle */}
+      <button
+        onClick={onToggleTheme}
+        title="Toggle theme"
+        className="hidden md:flex h-8 w-8 items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground shrink-0"
+      >
+        {isDark ? "☾" : "☀"}
+      </button>
+
+      {/* Strategy-Tester toggle */}
+      <button
+        onClick={onToggleTester}
+        title="Strategy Tester"
+        className={cn(
+          "hidden md:flex h-8 w-8 items-center justify-center rounded-md border shrink-0 text-sm",
+          testerOpen
+            ? "border-primary bg-primary/20 text-primary"
+            : "border-border bg-secondary text-muted-foreground",
+        )}
+      >
+        ⊞
+      </button>
 
       {/* Right Panel Toggles */}
       <div className="hidden md:flex items-center gap-0.5">
