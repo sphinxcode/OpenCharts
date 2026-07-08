@@ -100,7 +100,11 @@ async function resolveResponse<T>(res: Response): Promise<T> {
     const message = firstFieldMessage || err.message || detailMessage || res.statusText;
     throw new ApiError(res.status, code, message, err.details);
   }
-  return json?.data ?? json;
+  // Return the raw JSON. Do NOT unwrap `.data` — that was the PropSim
+  // envelope convention ({data: ...}), but Freqtrade responses use `data`
+  // as a real payload field (e.g. /pair_history's `{columns, data: rows[]}`),
+  // so unwrapping silently discarded `columns` and blanked the chart.
+  return json as T;
 }
 
 export interface RequestOptions extends RequestInit {
