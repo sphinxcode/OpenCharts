@@ -10,50 +10,52 @@ export type Timeframe = (typeof TIMEFRAMES)[number];
  */
 export const REPLAY_ENABLED = false;
 
+// Canvas-side colors for lightweight-charts (can't read CSS vars).
+// Trading Lab tokens — keep in sync with global.css (plan U1 / KTD9).
 export const CHART_COLORS = {
   dark: {
-    background: "#0b0e14",
-    text: "#9298a5",
-    grid: "#151923",
+    background: "#0b0d12", // --bg
+    text: "#7a8291", // --muted
+    grid: "#191e29", // gridlines
     crosshair: "#555c68",
-    up: "#0ecb81",
-    down: "#f6465d",
-    volumeUp: "rgba(14, 203, 129, 0.18)",
-    volumeDown: "rgba(246, 70, 93, 0.18)",
-    bidLine: "#0ecb81",
-    askLine: "#f6465d",
-    bidLabelBg: "#0ecb81",
-    askLabelBg: "#f6465d",
+    up: "#16c784", // --up
+    down: "#ea3943", // --down
+    volumeUp: "rgba(22, 199, 132, 0.18)",
+    volumeDown: "rgba(234, 57, 67, 0.18)",
+    bidLine: "#16c784",
+    askLine: "#ea3943",
+    bidLabelBg: "#16c784",
+    askLabelBg: "#ea3943",
     watermark: "rgba(255, 255, 255, 0.03)",
-    lastPriceUp: "#0ecb81",
-    lastPriceDown: "#f6465d",
-    orderLine: "#f0b90b",
-    positionLong: "#0ecb81",
-    positionShort: "#f6465d",
-    tpLine: "#0ecb81",
-    slLine: "#f6465d",
+    lastPriceUp: "#e0a52e", // --last (amber last-price tag, per design §3)
+    lastPriceDown: "#e0a52e",
+    orderLine: "#e0a52e",
+    positionLong: "#16c784",
+    positionShort: "#ea3943",
+    tpLine: "#16c784",
+    slLine: "#ea3943",
   },
   light: {
-    background: "#ffffff",
-    text: "#5d6068",
-    grid: "#f0f2f5",
+    background: "#f4f6f9", // --bg light
+    text: "#69707e", // --muted light
+    grid: "#eef1f6",
     crosshair: "#999",
-    up: "#0ecb81",
-    down: "#f6465d",
-    volumeUp: "rgba(14, 203, 129, 0.25)",
-    volumeDown: "rgba(246, 70, 93, 0.25)",
-    bidLine: "#0ecb81",
-    askLine: "#f6465d",
-    bidLabelBg: "#0ecb81",
-    askLabelBg: "#f6465d",
+    up: "#12a670", // --up light
+    down: "#e5484d", // --down light
+    volumeUp: "rgba(18, 166, 112, 0.25)",
+    volumeDown: "rgba(229, 72, 77, 0.25)",
+    bidLine: "#12a670",
+    askLine: "#e5484d",
+    bidLabelBg: "#12a670",
+    askLabelBg: "#e5484d",
     watermark: "rgba(0, 0, 0, 0.03)",
-    lastPriceUp: "#0ecb81",
-    lastPriceDown: "#f6465d",
-    orderLine: "#f0b90b",
-    positionLong: "#0ecb81",
-    positionShort: "#f6465d",
-    tpLine: "#0ecb81",
-    slLine: "#f6465d",
+    lastPriceUp: "#e0a52e",
+    lastPriceDown: "#e0a52e",
+    orderLine: "#e0a52e",
+    positionLong: "#12a670",
+    positionShort: "#e5484d",
+    tpLine: "#12a670",
+    slLine: "#e5484d",
   },
 };
 

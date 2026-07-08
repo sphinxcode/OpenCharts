@@ -3,60 +3,67 @@
 @tailwind utilities;
 
 @layer base {
-  /* Deep dark trading theme — inspired by E8 Markets aesthetic */
+  /* Trading Lab theme — tokens from design_handoff_trading_lab (README §Design Tokens).
+     hex → HSL triplets (see plan U1). --accent stays #14b8a6 across both themes. */
   :root {
-    --background: 220 20% 4.5%;
-    --foreground: 210 20% 88%;
-    --card: 220 18% 7%;
-    --card-foreground: 210 20% 88%;
-    --primary: 168 80% 48%;
-    --primary-foreground: 220 20% 4.5%;
-    --secondary: 220 16% 11%;
-    --secondary-foreground: 210 20% 88%;
-    --muted: 220 14% 15%;
-    --muted-foreground: 215 12% 48%;
-    --accent: 168 80% 48%;
-    --accent-foreground: 220 20% 4.5%;
-    --destructive: 0 72% 56%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 220 14% 14%;
-    --input: 220 16% 11%;
-    --ring: 168 80% 48%;
-    --radius: 0.5rem;
-    --success: 160 84% 44%;
-    --warning: 38 92% 50%;
-    --buy: 160 84% 44%;
-    --sell: 0 72% 56%;
-    --panel-header: 220 16% 9%;
-    --glow: 168 80% 48%;
+    --background: 222.9 24.1% 5.7%; /* --bg   #0b0d12 app/chart */
+    --foreground: 221.5 19.4% 86.9%; /* --text  #d7dbe4 */
+    --card: 223.6 23.4% 9.2%; /* --panel #12151d toolbars/panels */
+    --card-foreground: 221.5 19.4% 86.9%;
+    --primary: 173.4 80.4% 40%; /* --accent #14b8a6 */
+    --primary-foreground: 167.1 63.6% 4.3%; /* --accent-fg #04120f */
+    --secondary: 224 24.6% 12%; /* --panel2 #171b26 raised/inputs */
+    --secondary-foreground: 221.5 19.4% 86.9%;
+    --muted: 224 24.6% 12%; /* --panel2 surface */
+    --muted-foreground: 219.1 9.5% 52.4%; /* --muted #7a8291 */
+    --accent: 173.4 80.4% 40%; /* --accent #14b8a6 */
+    --accent-foreground: 167.1 63.6% 4.3%; /* --accent-fg #04120f */
+    --destructive: 356.6 80.8% 57.1%; /* --down  #ea3943 */
+    --destructive-foreground: 221.5 19.4% 86.9%;
+    --border: 225.7 23.1% 17.8%; /* --border #232838 */
+    --input: 224 24.6% 12%; /* --panel2 #171b26 */
+    --ring: 173.4 80.4% 40%;
+    --radius: 0.5rem; /* controls 6-8 / panels 10 / modals 14 applied inline */
+    --success: 157.3 80.1% 43.3%; /* --up    #16c784 */
+    --warning: 40.1 74.2% 52.9%; /* --last  #e0a52e */
+    --buy: 157.3 80.1% 43.3%; /* --up    #16c784 */
+    --sell: 356.6 80.8% 57.1%; /* --down  #ea3943 */
+    --last: 40.1 74.2% 52.9%; /* --last-price line/tag #e0a52e */
+    --grid: 221.3 24.2% 12.9%; /* chart gridlines #191e29 */
+    --code-bg: 222 27.8% 7.1%; /* python editor surface #0d1017 */
+    --panel-header: 223.6 23.4% 9.2%;
+    --glow: 173.4 80.4% 40%;
   }
 
-  /* Light theme */
+  /* Light theme (deltas from README §Design Tokens) */
   .light {
-    --background: 0 0% 98%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 168 80% 38%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222.2 84% 4.9%;
-    --muted: 210 40% 93%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 168 80% 38%;
+    --background: 216 29.4% 96.7%; /* --bg    #f4f6f9 */
+    --foreground: 224 24.6% 12%; /* --text  #171b26 */
+    --card: 0 0% 100%; /* --panel #ffffff */
+    --card-foreground: 224 24.6% 12%;
+    --primary: 173.4 80.4% 40%;
+    --primary-foreground: 0 0% 100%; /* --accent-fg #ffffff */
+    --secondary: 214.3 33.3% 95.9%; /* --panel2 #f1f4f8 */
+    --secondary-foreground: 224 24.6% 12%;
+    --muted: 214.3 33.3% 95.9%;
+    --muted-foreground: 220 9.1% 45.3%; /* --muted #69707e */
+    --accent: 173.4 80.4% 40%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
+    --destructive: 358.1 75.1% 59%; /* --down  #e5484d */
     --destructive-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 168 80% 38%;
+    --border: 220 26.1% 91%; /* --border #e2e6ee */
+    --input: 214.3 33.3% 95.9%;
+    --ring: 173.4 80.4% 40%;
     --radius: 0.5rem;
-    --success: 160 84% 35%;
-    --warning: 38 92% 45%;
-    --buy: 160 84% 35%;
-    --sell: 0 72% 51%;
-    --panel-header: 210 40% 96%;
-    --glow: 168 80% 38%;
+    --success: 158.1 80.4% 36.1%; /* --up    #12a670 */
+    --warning: 40.1 74.2% 45%;
+    --buy: 158.1 80.4% 36.1%;
+    --sell: 358.1 75.1% 59%;
+    --last: 40.1 74.2% 45%;
+    --grid: 217.5 30.8% 94.9%; /* #eef1f6 */
+    --code-bg: 216 45.5% 97.8%; /* #f7f9fc */
+    --panel-header: 214.3 33.3% 95.9%;
+    --glow: 173.4 80.4% 40%;
   }
 
   * {

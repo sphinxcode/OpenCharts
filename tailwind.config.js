@@ -38,6 +38,14 @@ export default {
         warning: "hsl(var(--warning))",
         buy: "hsl(var(--buy))",
         sell: "hsl(var(--sell))",
+        // Trading Lab design-token aliases (design_handoff_trading_lab)
+        up: "hsl(var(--buy))",
+        down: "hsl(var(--sell))",
+        last: "hsl(var(--last))",
+        grid: "hsl(var(--grid))",
+        code: "hsl(var(--code-bg))",
+        panel: "hsl(var(--card))",
+        panel2: "hsl(var(--secondary))",
       },
       borderRadius: {
         lg: "var(--radius)",
