@@ -1,0 +1,155 @@
+/**
+ * Humanized backtest report (Trading Lab). Turns a `MappedBacktestResults` into
+ * a plain-language markdown / printable-HTML report a non-expert can read,
+ * framed around the user's balance — WITH honest caveats. A backtest is what
+ * *would have* happened on past data; it is not a prediction or a guarantee,
+ * and backtests systematically overstate live results. The report says so.
+ */
+import type { MappedBacktestResults } from "./mappers.ts";
+import { checkProfitability } from "../../pages/trading/StrategyTester/testerUtils.ts";
+
+export interface ReportMeta {
+  strategyName: string;
+  symbol: string;
+  timeframe: string;
+  timerange: string | null;
+  /** The user's balance for the projection. */
+  balance: number;
+  /** Optional walk-forward verdict headline, if the user ran it. */
+  walkForwardHeadline?: string;
+  walkForwardVerdict?: string;
+}
+
+const money = (n: number) =>
+  `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pct = (r: number, d = 1) => `${(r * 100).toFixed(d)}%`;
+
+function humanTimerange(tr: string | null): string {
+  if (!tr) return "the tested period";
+  const [a, b] = tr.split("-");
+  const f = (s: string) => (/^\d{8}$/.test(s) ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}` : s);
+  return `${f(a)} to ${f(b)}`;
+}
+
+export function buildReportMarkdown(r: MappedBacktestResults, m: ReportMeta): string {
+  const gate = checkProfitability(r.winRate, r.avgRR);
+  const projected = m.balance * (1 + r.netPct);
+  const delta = projected - m.balance;
+  const up = r.netPct >= 0;
+  const avgRR = r.avgRR == null ? "not available" : `${r.avgRR.toFixed(2)}:1`;
+  const ddPct = Math.abs(r.maxdd) * 100;
+
+  const bottomLine = up
+    ? `That's a **gain of ${money(delta)}** on paper.`
+    : `That's a **loss of ${money(Math.abs(delta))}** on paper — this strategy lost money over this period.`;
+
+  const gateLine = gate.met
+    ? `**MET** ✅ — on paper it clears your bar. Treat that with heavy suspicion until you've walk-forward-tested it (see below) and paper-traded it live.`
+    : `**NOT MET** ❌ — it does not clear your profitability bar, so it isn't one to put money behind as-is.`;
+
+  const pfPlain =
+    r.pf >= 1
+      ? `For every $1 it lost, it made ${money(r.pf).replace("$", "$")} — above 1.0, so it made money overall on paper.`
+      : `For every $1 it lost, it only made about $${r.pf.toFixed(2)} — below 1.0 means it lost money overall.`;
+
+  const wf =
+    m.walkForwardHeadline && m.walkForwardVerdict
+      ? `\n## Is it real, or just curve-fit?\n\nWalk-forward test verdict: **${m.walkForwardVerdict.toUpperCase()}**.\n\n${m.walkForwardHeadline}\n`
+      : `\n## Is it real, or just curve-fit?\n\n_You haven't run the walk-forward test yet._ Before trusting ANY backtest, open the **Walk-forward** tab and run it — it splits the history into "train" and "validate" and tells you whether the result holds up out-of-sample or was just fitted to the past. This is the single most important check.\n`;
+
+  return `# Trading Lab — Backtest Report: ${m.strategyName}
+
+**Market:** ${m.symbol}  ·  **Timeframe:** ${m.timeframe}  ·  **Period tested:** ${humanTimerange(m.timerange)}
+
+---
+
+## The bottom line
+
+You set a starting balance of **${money(m.balance)}**. If **${m.strategyName}** had traded ${m.symbol} exactly as it did in this backtest, your balance would have gone from **${money(m.balance)}** to about **${money(projected)}** — a net return of **${pct(r.netPct)}**.
+
+${bottomLine}
+
+## Did it clear your bar?
+
+Your target: **≥51% win rate at ≥3:1 reward-to-risk, OR ≥31% at ≥6:1.**
+This strategy — win rate **${r.winRate.toFixed(1)}%**, average reward:risk **${avgRR}** — is ${gateLine}
+
+## What the numbers mean, in plain English
+
+- **${r.total} trades** (${r.wins} winners, ${r.losses} losers).
+- **Win rate ${r.winRate.toFixed(1)}%** — it won roughly ${Math.round(r.winRate / 10)} out of every 10 trades.
+- **Average win:risk ${avgRR}** — when it won, it made about that many times what it risked on the trade.
+- **Profit factor ${Number.isFinite(r.pf) ? r.pf.toFixed(2) : "—"}** — ${pfPlain}
+- **Worst drawdown ${ddPct.toFixed(1)}%** — at its lowest point your balance would have been down ${ddPct.toFixed(1)}% from its peak. Ask yourself honestly: could you hold through that without panicking?
+- **Sharpe ${r.sharpe.toFixed(2)}** — a risk-adjusted score. Above ~1 is decent; negative means you weren't paid for the risk you took.
+${wf}
+## ⚠️ Read this before risking a single dollar
+
+- This is a **backtest** — it shows what *would have* happened on **past** data. It is **not a prediction** and **not a guarantee**.
+- Real trading is **worse** than a backtest: fees, slippage, and the fact that any backtest is fitted to history all eat into results.
+- **Past performance does not repeat.** A strategy that looks great here can lose money live.
+- Never risk money you can't afford to lose. Paper-trade (dry-run) for weeks before considering real capital.
+
+---
+_Generated by Trading Lab · this report is for education, not financial advice._
+`;
+}
+
+/** Minimal markdown → HTML for the printable/PDF view (headings, bold, lists, hr). */
+function mdToHtml(md: string): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (s: string) => esc(s).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/_([^_]+)_/g, "<em>$1</em>");
+  const out: string[] = [];
+  let inList = false;
+  for (const raw of md.split("\n")) {
+    const line = raw.trimEnd();
+    if (/^- /.test(line)) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${inline(line.slice(2))}</li>`);
+      continue;
+    }
+    if (inList) { out.push("</ul>"); inList = false; }
+    if (line === "---") out.push("<hr/>");
+    else if (/^# /.test(line)) out.push(`<h1>${inline(line.slice(2))}</h1>`);
+    else if (/^## /.test(line)) out.push(`<h2>${inline(line.slice(3))}</h2>`);
+    else if (line === "") out.push("");
+    else out.push(`<p>${inline(line)}</p>`);
+  }
+  if (inList) out.push("</ul>");
+  return out.join("\n");
+}
+
+export function buildReportHtml(r: MappedBacktestResults, m: ReportMeta): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Trading Lab Report — ${m.strategyName}</title>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:32px auto;padding:0 20px;color:#171b26;line-height:1.55}
+  h1{font-size:22px;border-bottom:3px solid #14b8a6;padding-bottom:8px}
+  h2{font-size:15px;color:#0f766e;margin-top:26px}
+  strong{color:#0b0d12}
+  hr{border:none;border-top:1px solid #e2e6ee;margin:20px 0}
+  ul{padding-left:18px} li{margin:4px 0}
+  p{margin:8px 0}
+  @media print{body{margin:0}}
+</style></head><body>${mdToHtml(buildReportMarkdown(r, m))}</body></html>`;
+}
+
+export function downloadReportMarkdown(r: MappedBacktestResults, m: ReportMeta): void {
+  const blob = new Blob([buildReportMarkdown(r, m)], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `trading-lab-${m.strategyName}-${m.symbol.replace("/", "")}-${m.timeframe}.md`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** Opens the styled report in a new window and triggers the print dialog
+ *  (→ "Save as PDF"). No PDF library dependency. */
+export function printReportPdf(r: MappedBacktestResults, m: ReportMeta): void {
+  const w = window.open("", "_blank", "width=800,height=900");
+  if (!w) return;
+  w.document.write(buildReportHtml(r, m));
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 400);
+}

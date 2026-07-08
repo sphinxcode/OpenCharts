@@ -116,6 +116,10 @@ export interface ChartToolbarProps {
   onRunBacktest: () => void;
   /** 0-100 while a backtest is running; `undefined` renders the idle label. */
   backtestProgress?: number;
+  /** Available strategies (from GET /strategies) + the active selection. */
+  strategies?: string[];
+  activeStrategy?: string | null;
+  onSelectStrategy?: (s: string) => void;
   /** Current theme, for the ☾/☀ toggle glyph. */
   isDark: boolean;
   onToggleTheme: () => void;
@@ -158,6 +162,9 @@ export function ChartToolbar({
   onOpenIndicators,
   onRunBacktest,
   backtestProgress,
+  strategies = [],
+  activeStrategy,
+  onSelectStrategy,
   isDark,
   onToggleTheme,
   testerOpen,
@@ -440,8 +447,23 @@ export function ChartToolbar({
 
       <div className="flex-1 hidden md:block" />
 
-      {/* Run backtest — design region 1. Static/idle until plan U9 wires the
-          Freqtrade POST + progress poll; `backtestProgress` renders `NN%`
+      {/* Strategy picker — choose which Python strategy to backtest. */}
+      {strategies.length > 0 && (
+        <select
+          value={activeStrategy ?? strategies[0]}
+          onChange={(e) => onSelectStrategy?.(e.target.value)}
+          title="Strategy to backtest"
+          className="hidden md:block h-8 max-w-[150px] shrink-0 rounded-md border border-border bg-panel2 px-2 text-[12px] font-medium text-foreground"
+        >
+          {strategies.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* Run backtest — design region 1. `backtestProgress` renders `NN%`
           while a run is in flight. */}
       <button
         onClick={onRunBacktest}

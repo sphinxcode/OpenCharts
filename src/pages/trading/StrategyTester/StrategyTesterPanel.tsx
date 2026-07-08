@@ -16,6 +16,7 @@ import { Performance } from "./Performance.tsx";
 import { TradesList } from "./TradesList.tsx";
 import { Properties } from "./Properties.tsx";
 import { WalkForward } from "./WalkForward.tsx";
+import { ReportControls } from "./ReportControls.tsx";
 
 export type BacktestRunStatus = "idle" | "running" | "done" | "error";
 export type TesterTab = "overview" | "walkforward" | "performance" | "trades" | "properties";
@@ -128,14 +129,20 @@ export function StrategyTesterPanel({
               <EmptyState />
             )
           ) : (
-            <>
-              {tab === "overview" && <Overview results={results} isDark={isDark} />}
-              {tab === "performance" && <Performance results={results} />}
-              {tab === "trades" && <TradesList trades={results.trades} />}
-              {tab === "properties" && (
-                <Properties results={results} symbol={symbol} timeframe={timeframe} timerange={timerange} />
-              )}
-            </>
+            <div className="flex h-full flex-col">
+              <ReportControls
+                results={results}
+                meta={{ strategyName: strategyName ?? "strategy", symbol, timeframe, timerange }}
+              />
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {tab === "overview" && <Overview results={results} isDark={isDark} />}
+                {tab === "performance" && <Performance results={results} />}
+                {tab === "trades" && <TradesList trades={results.trades} />}
+                {tab === "properties" && (
+                  <Properties results={results} symbol={symbol} timeframe={timeframe} timerange={timerange} />
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}

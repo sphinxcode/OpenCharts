@@ -486,13 +486,15 @@ export function TradingPage() {
   // backend by resolving to `[]` (see services/api.ts), so this never
   // blocks boot.
   const [activeStrategyName, setActiveStrategyName] = useState<string | null>(null);
+  const [strategies, setStrategies] = useState<string[]>([]);
   useEffect(() => {
     let cancelled = false;
     api
       .getStrategies()
       .then((list) => {
         if (!cancelled && Array.isArray(list) && list.length > 0) {
-          setActiveStrategyName(list[0] ?? null);
+          setStrategies(list);
+          setActiveStrategyName((prev) => prev ?? list[0] ?? null);
         }
       })
       .catch(() => {
@@ -674,6 +676,9 @@ export function TradingPage() {
         }
         onRunBacktest={handleRunBacktest}
         backtestProgress={backtestProgress}
+        strategies={strategies}
+        activeStrategy={activeStrategyName}
+        onSelectStrategy={setActiveStrategyName}
         isDark={isDark}
         onToggleTheme={handleToggleTheme}
         testerOpen={!bottomPanelCollapsed}
