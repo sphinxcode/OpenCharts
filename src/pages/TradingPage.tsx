@@ -20,6 +20,7 @@ import type { IndicatorType } from "../lib/indicators.ts";
 import { posthog } from "../lib/posthog";
 import type { CreateJournalEntryInput, UpdateJournalEntryInput } from "../services/api/journal.ts";
 import { api } from "../services/api.ts";
+import { useIndicatorStore } from "../services/indicatorStore.ts";
 import {
   useAiTraderEnabled,
   useCandles,
@@ -35,6 +36,7 @@ import type { Order, PlaceOrderInput, Position, Symbol } from "../services/schem
 import { useTradingStore } from "../services/store.tsx";
 import { toast } from "../services/toast.ts";
 import { AiTraderPanel } from "./AiTraderPage.tsx";
+import { AddIndicatorModal } from "./trading/AddIndicatorModal.tsx";
 import { BottomPanel } from "./trading/BottomPanel.tsx";
 import { ChartPanel } from "./trading/ChartPanel.tsx";
 import { ChartToolbar } from "./trading/ChartToolbar.tsx";
@@ -115,8 +117,21 @@ export function TradingPage() {
     if (saved && TIMEFRAMES.includes(saved as Timeframe)) setTimeframe(saved as Timeframe);
   }, [selectedSymbol]);
 
-  const [activeIndicators, setActiveIndicators] = useState<IndicatorType[]>([]);
+  // Indicator instances (plan U4) — the store is the single source of truth;
+  // `activeIndicatorTypes` below is a derived `IndicatorType[]` view kept
+  // only to satisfy `ChartToolbar`'s legacy dropdown (plan U3) contract.
+  const inds = useIndicatorStore((s) => s.inds);
+  const addIndicator = useIndicatorStore((s) => s.add);
+  const removeIndicator = useIndicatorStore((s) => s.remove);
+  const clearIndicators = useIndicatorStore((s) => s.clear);
+  const activeIndicatorTypes = useMemo(
+    () => Array.from(new Set(inds.map((i) => i.type))),
+    [inds],
+  );
   const [showIndicatorMenu, setShowIndicatorMenu] = useState(false);
+  // Add-Indicator modal (plan U6) — the toolbar's ƒx button opens this once
+  // wired below; the legacy type-only dropdown (plan U3) stays available too.
+  const [showAddIndicatorModal, setShowAddIndicatorModal] = useState(false);
   const [drawingTool, setDrawingTool] = useState<DrawingTool>("none");
   const {
     drawings,
@@ -326,8 +341,37 @@ export function TradingPage() {
   );
 
   const handleClearIndicators = useCallback(() => {
-    setActiveIndicators([]);
-  }, []);
+    clearIndicators();
+  }, [clearIndicators]);
+
+  // Legacy dropdown "toggle" (plan U3/U4 bridge): add a default-params
+  // instance of `type` if none exists yet, otherwise remove every instance
+  // of that type. Multiple same-type instances added via the new
+  // Add-Indicator modal (U6) still individually manage themselves — this
+  // only drives the coarse on/off toolbar checkbox.
+  const handleToggleIndicator = useCallback(
+    (type: IndicatorType) => {
+      const existing = inds.filter((i) => i.type === type);
+      if (existing.length > 0) {
+        for (const i of existing) removeIndicator(i.iid);
+      } else {
+        addIndicator({ type });
+      }
+    },
+    [inds, addIndicator, removeIndicator],
+  );
+
+  // Chart-template "load" (plan U3 `ChartTemplatesMenu`): templates only
+  // ever stored a flat `IndicatorType[]` (never per-instance params), so
+  // loading one replaces the whole store with one default instance per type
+  // — the same fidelity the pre-U4 model had.
+  const handleSetIndicators = useCallback(
+    (types: IndicatorType[]) => {
+      clearIndicators();
+      for (const type of types) addIndicator({ type });
+    },
+    [clearIndicators, addIndicator],
+  );
 
   // Deep-history target used after the initial fast render completes.
   const deepCandleLimit = useMemo(() => {
@@ -445,6 +489,14 @@ export function TradingPage() {
     // TODO(U7): open IndicatorSettingsDialog for the strategy's instance.
   }, []);
 
+  // Legend gear / oscillator-pane gear (plan U5/U6) — no-op stub until the
+  // indicator Settings dialog (★ core screen, plan U7) exists to open. The
+  // `iid` is accepted so U7 only has to fill in the body here, not rewire
+  // every call site that already passes it through.
+  const handleOpenIndicatorSettings = useCallback((_iid: string) => {
+    // TODO(U7): open IndicatorSettingsDialog for this indicator instance.
+  }, []);
+
   // Mobile trading state
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
 
@@ -467,14 +519,11 @@ export function TradingPage() {
         onSymbolChange={setSelectedSymbol}
         timeframe={timeframe}
         onTimeframeChange={handleTimeframeChange}
-        activeIndicators={activeIndicators}
-        onToggleIndicator={(type) =>
-          setActiveIndicators((prev) =>
-            prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type],
-          )
-        }
+        activeIndicators={activeIndicatorTypes}
+        onToggleIndicator={handleToggleIndicator}
         showIndicatorMenu={showIndicatorMenu}
         onToggleIndicatorMenu={() => setShowIndicatorMenu((v) => !v)}
+        onOpenIndicators={() => setShowAddIndicatorModal(true)}
         drawingTool={drawingTool}
         onDrawingTool={setDrawingTool}
         drawings={drawings}
@@ -490,7 +539,7 @@ export function TradingPage() {
         replayAccountId={activeAccountId}
         activePlugins={activePlugins}
         onTogglePlugin={handleTogglePlugin}
-        onSetIndicators={setActiveIndicators}
+        onSetIndicators={handleSetIndicators}
         onSetPlugins={handleSetPlugins}
         magnetMode={chartPrefs.magnetMode}
         onCycleMagnet={cycleMagnetMode}
@@ -527,7 +576,6 @@ export function TradingPage() {
               selectedSymbol={selectedSymbol}
               timeframe={replayCandles ? "1m" : timeframe}
               isDark={isDark}
-              activeIndicators={activeIndicators}
               drawingTool={drawingTool}
               drawings={drawings}
               onAddDrawing={addDrawing}
@@ -555,6 +603,7 @@ export function TradingPage() {
               onQuickOrder={handleQuickOrder}
               onClearDrawings={clearDrawings}
               onClearIndicators={handleClearIndicators}
+              onOpenIndicatorSettings={handleOpenIndicatorSettings}
             />
           </div>
 
@@ -729,6 +778,10 @@ export function TradingPage() {
       </div>
 
       {/* Dialogs */}
+      <AddIndicatorModal
+        isOpen={showAddIndicatorModal}
+        onClose={() => setShowAddIndicatorModal(false)}
+      />
       <PositionModifyDialog
         position={modifyingPosition}
         onClose={() => setModifyingPosition(null)}

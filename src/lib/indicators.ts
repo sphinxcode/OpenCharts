@@ -258,8 +258,44 @@ export function vwap(candles: CandleData[]): IndicatorPoint[] {
   return result;
 }
 
+// ── Volume + Volume SMA ───────────────────────────────────────
+// Mirrors the backend RSIVolume strategy's `volume`/`vol_avg` pair
+// (INDICATOR_API.md §2) so the client-side "below" pane preview matches the
+// authoritative Freqtrade computation's shape. NOTE: `CandleData.volume` is
+// currently zeroed by `toIndicatorCandles()` (pre-existing limitation shared
+// with `vwap()` above) — see useIndicators.ts / OscillatorPane.tsx call
+// sites for the same caveat.
+export interface VolumeResult {
+  volume: IndicatorPoint[];
+  avg: IndicatorPoint[];
+}
+
+export function volumeWithAvg(candles: CandleData[], period = 20): VolumeResult {
+  const volume: IndicatorPoint[] = candles.map((c) => ({ time: c.time, value: c.volume || 0 }));
+  const avg: IndicatorPoint[] = [];
+  if (candles.length < period) return { volume, avg };
+
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += candles[i]!.volume || 0;
+  avg.push({ time: candles[period - 1]!.time, value: sum / period });
+  for (let i = period; i < candles.length; i++) {
+    sum += (candles[i]!.volume || 0) - (candles[i - period]!.volume || 0);
+    avg.push({ time: candles[i]!.time, value: sum / period });
+  }
+  return { volume, avg };
+}
+
 // ── Indicator Registry (for UI) ──────────────────────────────
-export type IndicatorType = "SMA" | "EMA" | "RSI" | "MACD" | "BOLL" | "ATR" | "STOCH" | "VWAP";
+export type IndicatorType =
+  | "SMA"
+  | "EMA"
+  | "RSI"
+  | "MACD"
+  | "BOLL"
+  | "ATR"
+  | "STOCH"
+  | "VWAP"
+  | "VOLUME";
 
 export type IndicatorPane = "overlay" | "below";
 
@@ -326,6 +362,13 @@ export const INDICATOR_REGISTRY: IndicatorConfig[] = [
     label: "Volume Weighted Avg Price",
     pane: "overlay",
     defaultParams: {},
-    color: "#42a5f5",
+    color: "#60a5fa",
+  },
+  {
+    type: "VOLUME",
+    label: "Volume",
+    pane: "below",
+    defaultParams: { period: 20 },
+    color: "#60a5fa",
   },
 ];

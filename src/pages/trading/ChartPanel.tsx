@@ -37,9 +37,9 @@ import { CrosshairHighlightPrimitive } from "../../lib/chart-plugins/highlight-b
 import { SessionBreaks } from "../../lib/chart-plugins/session-breaks/session-breaks.ts";
 import { SessionHighlighting } from "../../lib/chart-plugins/session-highlighting/session-highlighting.ts";
 import { TooltipPrimitive } from "../../lib/chart-plugins/tooltip/tooltip.ts";
-import type { IndicatorType } from "../../lib/indicators.ts";
 import { cn } from "../../lib/utils.ts";
 import { api } from "../../services/api.ts";
+import { useIndicatorStore } from "../../services/indicatorStore.ts";
 import { queryKeys } from "../../services/queries.ts";
 import type { Candle, Order, Position, Symbol } from "../../services/schemas.ts";
 import { toast } from "../../services/toast.ts";
@@ -53,6 +53,7 @@ import {
   type Timeframe,
 } from "./constants.ts";
 import { ChartContextMenu } from "./ChartContextMenu.tsx";
+import { ChartLegend } from "./ChartLegend.tsx";
 import { ChartSettingsDialog } from "./ChartSettingsDialog.tsx";
 import {
   DrawingContextMenu,
@@ -62,6 +63,7 @@ import {
 import { DRAWING_STYLES_EVENT, getStyleDefaults } from "./drawingStyles.ts";
 import { NewsOverlay } from "./NewsOverlay.tsx";
 import { ObjectTreePanel } from "./ObjectTreePanel.tsx";
+import { OscillatorPane } from "./OscillatorPane.tsx";
 import { useChallengeLevels } from "./useChallengeLevels.ts";
 import { useIndicators } from "./useIndicators.ts";
 import { useNewsOverlay } from "./useNewsOverlay.ts";
@@ -197,7 +199,6 @@ export interface ChartPanelProps {
   selectedSymbol: string;
   timeframe: Timeframe;
   isDark: boolean;
-  activeIndicators: IndicatorType[];
   drawingTool: DrawingTool;
   drawings: DrawingLine[];
   onAddDrawing: (d: DrawingLine) => void;
@@ -254,6 +255,12 @@ export interface ChartPanelProps {
   /** Context-menu "Remove N indicators". */
   onClearIndicators?: () => void;
   /**
+   * Opens the indicator Settings dialog for an instance (legend/oscillator
+   * gear icon, plan U5/U6 → ★ core screen U7). `TradingPage.tsx` passes a
+   * no-op TODO(U7) stub until that dialog exists.
+   */
+  onOpenIndicatorSettings?: (iid: string) => void;
+  /**
    * Session replay is active — candles are a historical slice, so the
    * staleness watchdog must not treat the old last-bar as a data gap.
    */
@@ -290,6 +297,13 @@ function buildSessionBreaks(ctx: PluginBuildCtx): ISeriesPrimitive<Time> | null 
     color: ctx.isDark ? "rgba(130, 150, 190, 0.5)" : "rgba(90, 110, 150, 0.45)",
     sessionStart: EQUITY_CATEGORY.test(ctx.symbolCategory ?? "") ? "ny-0930" : "utc-midnight",
   });
+}
+
+// Stable fallback for `onOpenIndicatorSettings` (plan U7 not wired yet) — a
+// module-level constant so ChartLegend/OscillatorPane don't get a new
+// function identity, and thus don't re-render, on every ChartPanel render.
+function noopOpenIndicatorSettings(_iid: string): void {
+  // TODO(U7): IndicatorSettingsDialog isn't wired in until plan U7 lands.
 }
 
 const PLUGIN_FACTORIES: Record<string, (ctx: PluginBuildCtx) => ISeriesPrimitive<Time> | null> = {
@@ -1073,7 +1087,6 @@ export function ChartPanel({
   selectedSymbol,
   timeframe,
   isDark,
-  activeIndicators,
   drawingTool,
   drawings,
   onAddDrawing,
@@ -1100,9 +1113,15 @@ export function ChartPanel({
   onQuickOrder,
   onClearDrawings,
   onClearIndicators,
+  onOpenIndicatorSettings,
   isReplaying = false,
 }: ChartPanelProps) {
   const queryClient = useQueryClient();
+  // Indicator instances (plan U4) — read straight from the store so no
+  // prop-drilling is needed from TradingPage; only actually mutates on
+  // add/remove/update, so this reference stays stable across unrelated
+  // ChartPanel re-renders (ticks, legend state, etc.).
+  const inds = useIndicatorStore((s) => s.inds);
   const lastGapRefetchAtRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -1128,6 +1147,10 @@ export function ChartPanel({
   const bidLineRef = useRef<IPriceLine | null>(null);
   const askLineRef = useRef<IPriceLine | null>(null);
   const midLineRef = useRef<IPriceLine | null>(null);
+  // Dashed amber last-price line (design README §3 "a dashed last-price line
+  // with an --last price tag on the right axis") — separate from the
+  // trading-specific bid/ask lines above.
+  const lastPriceLineRef = useRef<IPriceLine | null>(null);
 
   // ── SL/TP drag-to-edit state ──
   const slTpLinesRef = useRef<SlTpMap>(new Map());
@@ -1388,7 +1411,7 @@ export function ChartPanel({
     [onAddDrawing, pipDigits, timeframe, selectedSymbol],
   );
 
-  useIndicators(chartRef, candleSeriesRef, chartData, activeIndicators, isDark);
+  useIndicators(chartRef, candleSeriesRef, chartData, inds, isDark);
 
   // ── Replay trade event markers ─────────────────────────────
   useEffect(() => {
@@ -1643,6 +1666,7 @@ export function ChartPanel({
       bidLineRef.current = null;
       askLineRef.current = null;
       midLineRef.current = null;
+      lastPriceLineRef.current = null;
       chartPluginsRef.current = [];
       // Clear per-chart state so it doesn't bleed into the recreated chart
       // (theme toggle also destroys/recreates the chart instance).
@@ -1906,6 +1930,45 @@ export function ChartPanel({
     );
   }, [tick, chartPrefs.showBidLine, chartPrefs.showAskLine, makeRtCtx]);
 
+  // ── Dashed amber last-price line (design README §3) ────────
+  // Independent of the bid/ask lines above — tracks the latest close from
+  // the OHLCV legend state so it's always present even when there's no live
+  // tick feed (e.g. a symbol with delayed/absent quotes still has candles).
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    if (!legend) {
+      if (lastPriceLineRef.current) {
+        try {
+          series.removePriceLine(lastPriceLineRef.current);
+        } catch {
+          /* already removed */
+        }
+        lastPriceLineRef.current = null;
+      }
+      return;
+    }
+    const opts = {
+      price: legend.c,
+      color: colors.lastPriceUp,
+      lineWidth: 1 as const,
+      lineStyle: LineStyle.Dashed,
+      axisLabelVisible: true,
+      title: "Last",
+      axisLabelColor: colors.lastPriceUp,
+      axisLabelTextColor: isDark ? "#04120f" : "#ffffff",
+    };
+    if (lastPriceLineRef.current) {
+      try {
+        lastPriceLineRef.current.applyOptions(opts);
+        return;
+      } catch {
+        lastPriceLineRef.current = null;
+      }
+    }
+    lastPriceLineRef.current = series.createPriceLine(opts);
+  }, [legend, colors.lastPriceUp, isDark]);
+
   // ── Position/order overlays ────────────────────────────────
   useEffect(() => {
     const series = candleSeriesRef.current;
@@ -1938,7 +2001,14 @@ export function ChartPanel({
   ]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="flex h-full w-full flex-col">
+      {/* Main chart region — everything below is `absolute` positioned
+          relative to this div (legend overlays, dialogs, drag tooltip, the
+          chart canvas itself). `flex-1 min-h-0` lets the OscillatorPane
+          (plan U6, mounted as a sibling below) claim its fixed 132px
+          without this region refusing to shrink inside TradingPage's
+          `min-h-[200px]` chart-pane clamp. */}
+      <div className="relative min-h-0 w-full flex-1">
       {/* OHLCV Legend Overlay */}
       <ChartLegendHeader
         selectedSymbol={selectedSymbol}
@@ -1950,6 +2020,10 @@ export function ChartPanel({
         showOhlcLegend={chartPrefs.showOhlcLegend}
         showCountdown={chartPrefs.showCountdown}
       />
+
+      {/* Per-instance overlay-indicator legend rows (plan U5, README §3) —
+          stacked directly under the OHLCV header above. */}
+      <ChartLegend inds={inds} onOpenSettings={onOpenIndicatorSettings ?? noopOpenIndicatorSettings} />
 
       {/* Drag-to-edit tooltip */}
       {dragPrice && (
@@ -2043,7 +2117,7 @@ export function ChartPanel({
           symbol={selectedSymbol}
           tick={tick}
           drawingsCount={visibleDrawings.length}
-          indicatorsCount={activeIndicators.length}
+          indicatorsCount={inds.length}
           onClose={() => setChartMenu(null)}
           onResetView={handleResetView}
           onCopyPrice={handleCopyPrice}
@@ -2069,6 +2143,17 @@ export function ChartPanel({
 
       {/* Chart container — cursor is managed imperatively by DrawingToolsManager */}
       <div ref={containerRef} className="w-full h-full" onContextMenu={handleChartContextMenu} />
+      </div>
+
+      {/* 132px oscillator sub-pane (plan U6) — mounts only while a "below"
+          instance (RSI/MACD/ATR/STOCH/VOLUME) exists; renders null otherwise. */}
+      <OscillatorPane
+        mainChartRef={chartRef}
+        chartData={chartData}
+        inds={inds}
+        isDark={isDark}
+        onOpenSettings={onOpenIndicatorSettings ?? noopOpenIndicatorSettings}
+      />
     </div>
   );
 }
