@@ -107,7 +107,21 @@ export function EquityChart({ points, startingBalance, isDark }: EquityChartProp
   useEffect(() => {
     const series = seriesRef.current;
     if (!series) return;
-    if (points.length === 0) {
+    // Sanitize: lightweight-charts' Area renderer throws "Value is null" on
+    // duplicate/non-ascending times or non-finite values. Multiple trades can
+    // close in the same candle → identical eqPt timestamps, so dedupe by time
+    // (keep the last cumulative value), drop non-finite, and sort ascending.
+    const base = Number.isFinite(startingBalance) ? startingBalance : 0;
+    const byTime = new Map<number, number>();
+    for (const p of points) {
+      const t = Math.floor(Number(p.time));
+      const v = base + Number(p.value);
+      if (Number.isFinite(t) && Number.isFinite(v)) byTime.set(t, v);
+    }
+    const data = [...byTime.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([time, value]) => ({ time: time as Time, value }));
+    if (data.length === 0) {
       series.setData([]);
       if (baselineRef.current) {
         try {
@@ -119,7 +133,7 @@ export function EquityChart({ points, startingBalance, isDark }: EquityChartProp
       }
       return;
     }
-    series.setData(points.map((p) => ({ time: p.time as Time, value: startingBalance + p.value })));
+    series.setData(data);
 
     const baselineOpts = {
       price: startingBalance,
