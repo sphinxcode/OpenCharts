@@ -50,9 +50,11 @@ import {
 } from "./trading/constants.ts";
 import { DOMPanel } from "./trading/DOMPanel.tsx";
 import { DrawingToolRail } from "./trading/DrawingToolRail.tsx";
+import { IndicatorSettingsDialog } from "./trading/IndicatorSettingsDialog.tsx";
 import { MarketClosedBanner } from "./trading/MarketClosedBanner.tsx";
 import { type StrategyPanelTab, RightPanel } from "./trading/RightPanel.tsx";
 import { ReplayScrubber } from "./trading/ReplayScrubber.tsx";
+import { StrategySourceDialog } from "./trading/StrategySourceDialog.tsx";
 import type { BacktestRunStatus } from "./trading/StrategyTester/StrategyTesterPanel.tsx";
 import { useReplayChartData } from "./trading/useReplayChartData.ts";
 import { useReplayPlayback } from "./trading/useReplayPlayback.ts";
@@ -579,18 +581,22 @@ export function TradingPage() {
     toggleBottomPanelCollapsed,
   ]);
 
-  // Strategy tab "Edit strategy source" — no-op stub until the indicator
-  // Settings dialog (plan U7) exists to open.
-  const handleEditStrategy = useCallback(() => {
-    // TODO(U7): open IndicatorSettingsDialog for the strategy's instance.
+  // Legend gear / oscillator-pane gear (plan U5/U6) → opens the ★ core
+  // Indicator Settings dialog (plan U7) for that instance.
+  const [settingsIid, setSettingsIid] = useState<string | null>(null);
+  const handleOpenIndicatorSettings = useCallback((iid: string) => {
+    setSettingsIid(iid);
   }, []);
 
-  // Legend gear / oscillator-pane gear (plan U5/U6) — no-op stub until the
-  // indicator Settings dialog (★ core screen, plan U7) exists to open. The
-  // `iid` is accepted so U7 only has to fill in the body here, not rewire
-  // every call site that already passes it through.
-  const handleOpenIndicatorSettings = useCallback((_iid: string) => {
-    // TODO(U7): open IndicatorSettingsDialog for this indicator instance.
+  // Strategy tab "Edit strategy source" — the Elliott Wave/Harmonic card has
+  // no backing indicatorStore instance (those catalog entries are
+  // `disabled: true`, so they never reach `indicatorStore.add()`), so this
+  // opens the standalone `StrategySourceDialog` seeded from the active
+  // strategy's `.py` instead of `IndicatorSettingsDialog` (see that file's
+  // header comment for the full rationale).
+  const [showStrategySource, setShowStrategySource] = useState(false);
+  const handleEditStrategy = useCallback(() => {
+    setShowStrategySource(true);
   }, []);
 
   // Mobile trading state
@@ -887,6 +893,12 @@ export function TradingPage() {
       <AddIndicatorModal
         isOpen={showAddIndicatorModal}
         onClose={() => setShowAddIndicatorModal(false)}
+      />
+      <IndicatorSettingsDialog iid={settingsIid} onClose={() => setSettingsIid(null)} />
+      <StrategySourceDialog
+        open={showStrategySource}
+        onClose={() => setShowStrategySource(false)}
+        strategyName={activeStrategyName ?? "RSIVolume"}
       />
       <PositionModifyDialog
         position={modifyingPosition}
