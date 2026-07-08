@@ -42,6 +42,14 @@ export interface MarketDataCandleMetadata {
 export interface MarketDataCandlesPayload {
   candles: MarketDataCandle[];
   metadata: MarketDataCandleMetadata;
+  /**
+   * Non-OHLCV `/pair_candles` columns (e.g. `rsi`, `bb_lower`/`bb_mid`/
+   * `bb_upper`), keyed by column name — populated only by the Freqtrade
+   * adapter's `getCandlesWithMeta` (see `services/api.ts`, plan U10 / R5).
+   * The demo/PropSim market-data backend never sets this, so it's optional
+   * and every consumer must tolerate its absence.
+   */
+  indicators?: Record<string, { time: number; value: number }[]>;
 }
 
 export interface MarketDataTick {

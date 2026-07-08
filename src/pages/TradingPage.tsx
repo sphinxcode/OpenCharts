@@ -28,6 +28,7 @@ import {
   useDeleteJournalEntry,
   useJournalEntries,
   useOrders,
+  usePairIndicators,
   usePositions,
   useSymbols,
   useUpdateJournalEntry,
@@ -59,6 +60,7 @@ import type { BacktestRunStatus } from "./trading/StrategyTester/StrategyTesterP
 import { useReplayChartData } from "./trading/useReplayChartData.ts";
 import { useReplayPlayback } from "./trading/useReplayPlayback.ts";
 import { computeDefaultTimerange, getPipDigits } from "./trading/utils.ts";
+import { pickAuthoritativeBollinger } from "../services/freqtrade/mappers.ts";
 import type { MappedBacktestResults } from "../services/freqtrade/mappers.ts";
 
 type ErrorWithMessage = { message?: string };
@@ -515,6 +517,27 @@ export function TradingPage() {
     [],
   );
 
+  // Authoritative overlay reconciliation (plan U10 / R5): once a backtest
+  // has completed, fetch the same `/pair_candles` response `useCandles`
+  // already reads (identical query key/args → shared cache entry, no extra
+  // request) and pick out the authoritative Bollinger columns to draw over
+  // the client-side BOLL preview. Gated on `backtestStatus === "done"` so
+  // this is a no-op query during ordinary chart browsing. Note this assumes
+  // the backtest ran against the currently selected symbol/timeframe — the
+  // same assumption `backtestSymbol`/`backtestTimeframe` below already make
+  // (plan U9); there's no separate "the backtest was run for X/Y" record.
+  const { data: pairIndicators } = usePairIndicators(
+    selectedSymbol,
+    timeframe,
+    candleLimit,
+    replayVersion,
+    backtestStatus === "done",
+  );
+  const authoritativeBollinger = useMemo(
+    () => (pairIndicators ? pickAuthoritativeBollinger(pairIndicators) : null),
+    [pairIndicators],
+  );
+
   // Run backtest (toolbar ▶ button, plan U9): POST /backtest -> poll
   // GET /backtest (progress 0..1 -> toolbar NN%) -> on completion, map the
   // raw BacktestResult into the Strategy Tester's `results` shape and
@@ -707,6 +730,8 @@ export function TradingPage() {
               onClearDrawings={clearDrawings}
               onClearIndicators={handleClearIndicators}
               onOpenIndicatorSettings={handleOpenIndicatorSettings}
+              backtestTrades={backtestResults?.trades}
+              authoritativeBollinger={authoritativeBollinger}
             />
           </div>
 

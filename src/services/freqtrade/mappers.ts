@@ -92,6 +92,45 @@ export function mapPairCandles(raw: PairHistoryResponse | null | undefined): Map
   return { candles, indicators };
 }
 
+// ── Authoritative overlay reconciliation (R5, plan U10) ─────────────────────
+// After a backtest, the server-computed `populate_indicators` columns from
+// `/pair_candles` (via `mapPairCandles` above) are authoritative — they can
+// diverge from the client-side TS preview (`lib/indicators.ts`) since the
+// two implementations aren't guaranteed bit-identical. This is the "small
+// helper" for that reconciliation: it locates the Bollinger columns (the one
+// preview indicator with a clean 1:1 authoritative column mapping — `rsi`'s
+// authoritative counterpart lives in the oscillator sub-pane, which isn't
+// wired to this in U10; see the U10 report's TODO) inside a
+// `mapPairCandles(...).indicators` map so a caller can draw them over the
+// preview BOLL series.
+
+export interface AuthoritativeBollinger {
+  upper: MappedIndicatorPoint[];
+  mid: MappedIndicatorPoint[];
+  lower: MappedIndicatorPoint[];
+}
+
+/**
+ * Picks the authoritative Bollinger Band columns (`bb_upper`/`bb_mid`/
+ * `bb_lower`, VERIFIED-API-CONTRACT.md `/pair_candles` `columns[]`) out of a
+ * `mapPairCandles(...).indicators` map. Column names are matched
+ * case-insensitively and tolerant of the `bb_middle` alias some strategies
+ * use instead of `bb_mid`. Returns `null` when any of the three columns is
+ * missing or empty (e.g. the active strategy doesn't compute Bollinger, or
+ * `/pair_candles` came back malformed/not-yet-loaded) — never a partial or
+ * misleading overlay.
+ */
+export function pickAuthoritativeBollinger(
+  indicators: Record<string, MappedIndicatorPoint[]>,
+): AuthoritativeBollinger | null {
+  const byLower = new Map(Object.entries(indicators).map(([k, v]) => [k.toLowerCase(), v]));
+  const upper = byLower.get("bb_upper");
+  const mid = byLower.get("bb_mid") ?? byLower.get("bb_middle");
+  const lower = byLower.get("bb_lower");
+  if (!upper?.length || !mid?.length || !lower?.length) return null;
+  return { upper, mid, lower };
+}
+
 // ── Backtest transport (R6) ──────────────────────────────────────────────
 
 export interface BacktestStartParams {

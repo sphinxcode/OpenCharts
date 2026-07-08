@@ -39,6 +39,7 @@ import { SessionHighlighting } from "../../lib/chart-plugins/session-highlightin
 import { TooltipPrimitive } from "../../lib/chart-plugins/tooltip/tooltip.ts";
 import { cn } from "../../lib/utils.ts";
 import { api } from "../../services/api.ts";
+import type { AuthoritativeBollinger, RawTrade } from "../../services/freqtrade/mappers.ts";
 import { useIndicatorStore } from "../../services/indicatorStore.ts";
 import { queryKeys } from "../../services/queries.ts";
 import type { Candle, Order, Position, Symbol } from "../../services/schemas.ts";
@@ -265,6 +266,21 @@ export interface ChartPanelProps {
    * staleness watchdog must not treat the old last-bar as a data gap.
    */
   isReplaying?: boolean;
+  /**
+   * Completed backtest's `trades[]` (plan U10 / R9) — entry+exit markers are
+   * drawn on the main candlestick series via `series.setMarkers()`.
+   * `undefined`/empty clears markers (before any backtest has run, or once
+   * `TradingPage.handleRunBacktest` resets results to `null` at the start of
+   * a new run).
+   */
+  backtestTrades?: RawTrade[];
+  /**
+   * Authoritative Bollinger columns from the backtest's `/pair_candles`
+   * response (plan U10 / R5), drawn dashed over any BOLL preview instance.
+   * `undefined`/`null` (no backtest yet, or the strategy has no Bollinger
+   * columns) leaves the preview untouched.
+   */
+  authoritativeBollinger?: AuthoritativeBollinger | null;
 }
 
 // ── Chart plugin overlays ─────────────────────────────────────────────────────
@@ -866,6 +882,77 @@ function buildReplayMarker(ev: ReplayTradeEvent, timeframe: Timeframe): SeriesMa
   };
 }
 
+// ── Backtest trade markers (plan U10 / R9) ───────────────────────────────
+// `RawTrade.open_timestamp`/`close_timestamp` are epoch **ms**
+// (VERIFIED-API-CONTRACT.md). Bucketed to the current chart timeframe via
+// `getCandleBucketTime` — the same convention `buildReplayMarker` above
+// uses — so a marker always lands on a coordinate lightweight-charts can
+// place, even when the backtest ran on a different timeframe than the one
+// currently displayed.
+function backtestTradeTime(ms: number | undefined, timeframe: Timeframe): Time | null {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return null;
+  return getCandleBucketTime(ms, timeframe) as Time;
+}
+
+// Colored by outcome (profit_abs sign, Trading Lab up/down tokens) rather
+// than side — a glance at the chart shows which trades won vs lost, per the
+// plan's "colored by profit" spec.
+function tradeOutcomeColor(t: RawTrade, colors: ChartColors): string {
+  return (t.profit_abs ?? 0) > 0 ? colors.up : colors.down;
+}
+
+function buildBacktestEntryMarker(
+  t: RawTrade,
+  timeframe: Timeframe,
+  colors: ChartColors,
+): SeriesMarker<Time> | null {
+  const time = backtestTradeTime(t.open_timestamp, timeframe);
+  if (!time) return null;
+  const isShort = !!t.is_short;
+  return {
+    time,
+    position: isShort ? "aboveBar" : "belowBar",
+    color: tradeOutcomeColor(t, colors),
+    shape: isShort ? "arrowDown" : "arrowUp",
+    text: t.enter_tag || (isShort ? "Short" : "Long"),
+  };
+}
+
+function buildBacktestExitMarker(
+  t: RawTrade,
+  timeframe: Timeframe,
+  colors: ChartColors,
+): SeriesMarker<Time> | null {
+  const time = backtestTradeTime(t.close_timestamp, timeframe);
+  if (!time) return null;
+  const isShort = !!t.is_short;
+  return {
+    time,
+    // Opposite side of the entry arrow so entry/exit markers on the same
+    // bar (a fast round-trip trade) don't visually collide.
+    position: isShort ? "belowBar" : "aboveBar",
+    color: tradeOutcomeColor(t, colors),
+    shape: "circle",
+    text: t.exit_reason || "Exit",
+  };
+}
+
+function buildBacktestMarkers(
+  trades: RawTrade[] | undefined,
+  timeframe: Timeframe,
+  colors: ChartColors,
+): SeriesMarker<Time>[] {
+  if (!trades || trades.length === 0) return [];
+  const markers: SeriesMarker<Time>[] = [];
+  for (const t of trades) {
+    const entry = buildBacktestEntryMarker(t, timeframe, colors);
+    if (entry) markers.push(entry);
+    const exit = buildBacktestExitMarker(t, timeframe, colors);
+    if (exit) markers.push(exit);
+  }
+  return markers;
+}
+
 // ── HUD presentational sub-components ────────────────────────────────────────
 // Extracted so the legend's per-value colour ternaries live here instead of
 // inflating the ChartPanel render function's cognitive complexity.
@@ -1115,6 +1202,8 @@ export function ChartPanel({
   onClearIndicators,
   onOpenIndicatorSettings,
   isReplaying = false,
+  backtestTrades,
+  authoritativeBollinger,
 }: ChartPanelProps) {
   const queryClient = useQueryClient();
   // Indicator instances (plan U4) — read straight from the store so no
@@ -1411,28 +1500,35 @@ export function ChartPanel({
     [onAddDrawing, pipDigits, timeframe, selectedSymbol],
   );
 
-  useIndicators(chartRef, candleSeriesRef, chartData, inds, isDark);
+  useIndicators(chartRef, candleSeriesRef, chartData, inds, isDark, authoritativeBollinger);
 
-  // ── Replay trade event markers ─────────────────────────────
+  // ── Trade markers: session replay + backtest results (plan U10 / R9) ────
+  // Both sources render via `series.setMarkers()` — a single call replaces
+  // the whole marker set on the series — so they're combined in one effect
+  // rather than two independent ones; two effects would each call
+  // `setMarkers` with only their own markers, and whichever ran last on a
+  // given commit would silently erase the other's. Markers clear (empty
+  // array) whenever both sources are empty, e.g. before any backtest has
+  // run or once `TradingPage` resets `backtestResults` to `null` at the
+  // start of a new run.
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
-    if (!replayTradeEvents || replayTradeEvents.length === 0) {
-      series.setMarkers([]);
-      return;
-    }
     const markers: SeriesMarker<Time>[] = [];
-    for (const ev of replayTradeEvents) {
-      const marker = buildReplayMarker(ev, timeframe);
-      if (marker) markers.push(marker);
+    if (replayTradeEvents && replayTradeEvents.length > 0) {
+      for (const ev of replayTradeEvents) {
+        const marker = buildReplayMarker(ev, timeframe);
+        if (marker) markers.push(marker);
+      }
     }
+    markers.push(...buildBacktestMarkers(backtestTrades, timeframe, colors));
     // lightweight-charts requires markers sorted by time ascending
     markers.sort((a, b) => (a.time as number) - (b.time as number));
     series.setMarkers(markers);
     return () => {
       series.setMarkers([]);
     };
-  }, [replayTradeEvents, timeframe]);
+  }, [replayTradeEvents, backtestTrades, timeframe, colors]);
 
   // ── Candle close countdown timer ───────────────────────────
   useEffect(() => {

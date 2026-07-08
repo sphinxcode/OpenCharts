@@ -151,15 +151,21 @@ export const freqtradeApi = {
   getCandlesWithMeta: async (symbol: string, timeframe: string, limit?: number) => {
     try {
       const raw = await ft.getPairCandles(symbol, timeframe, limit);
-      const { candles } = mapPairCandles(raw);
+      // `indicators` (plan U10 / R5) carries the authoritative
+      // `populate_indicators` columns (rsi, bb_lower/mid/upper, ...) so
+      // callers can reconcile them against the client-side preview after a
+      // backtest — see `pickAuthoritativeBollinger` in ./freqtrade/mappers.ts.
+      const { candles, indicators } = mapPairCandles(raw);
       return {
         candles,
+        indicators,
         metadata: { isPartial: false, backfillQueued: false, historicalCoverageStart: null },
       };
     } catch (err) {
       console.warn("[freqtradeApi] getCandlesWithMeta failed — offline.", err);
       return {
         candles: [],
+        indicators: {},
         metadata: { isPartial: false, backfillQueued: false, historicalCoverageStart: null },
       };
     }

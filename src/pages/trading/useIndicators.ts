@@ -3,6 +3,7 @@ import type { CandlestickData, IChartApi, ISeriesApi, Time } from "lightweight-c
 import { LineStyle } from "lightweight-charts";
 import { bollingerBands, ema, INDICATOR_REGISTRY, sma, vwap } from "../../lib/indicators.ts";
 import type { Indicator } from "../../services/indicatorStore.ts";
+import type { AuthoritativeBollinger } from "../../services/freqtrade/mappers.ts";
 import { toIndicatorCandles } from "./utils.ts";
 
 type AnySeries = ISeriesApi<"Line"> | ISeriesApi<"Histogram">;
@@ -34,6 +35,13 @@ function numParam(
  * here — they mount in the dedicated `OscillatorPane` (plan U6) below the
  * main chart instead of the pre-U4 approach of overlaying a hidden named
  * price scale on the main pane.
+ *
+ * `authoritativeBollinger` (plan U10 / R5) is the backtest's server-computed
+ * Bollinger columns (`services/freqtrade/mappers.ts` `pickAuthoritativeBollinger`)
+ * — when present, every BOLL instance also gets three dashed "authoritative"
+ * lines drawn on top of its client-side preview so the two can be visually
+ * reconciled. `undefined`/`null` (no backtest yet, or the strategy doesn't
+ * compute Bollinger) draws nothing extra — the preview alone is unaffected.
  */
 export function useIndicators(
   chartRef: React.RefObject<IChartApi | null>,
@@ -41,6 +49,7 @@ export function useIndicators(
   chartData: CandlestickData<Time>[],
   inds: Indicator[],
   isDark: boolean,
+  authoritativeBollinger?: AuthoritativeBollinger | null,
 ): void {
   const seriesRef = useRef<Map<string, AnySeries[]>>(new Map());
 
@@ -126,6 +135,48 @@ export function useIndicators(
           });
           lower.setData(data.lower.map((p) => ({ time: p.time as Time, value: p.value })));
           created.push(upper, mid, lower);
+
+          // Authoritative overlay (R5): server `populate_indicators` Bollinger
+          // columns, dashed, drawn atop this instance's preview. Every BOLL
+          // instance gets the same three authoritative lines (there is only
+          // one authoritative strategy result to reconcile against) — with a
+          // single BOLL instance, the common case, they draw exactly once.
+          if (authoritativeBollinger) {
+            const authColor = isDark ? "rgba(255,255,255,0.45)" : "rgba(0,0,0,0.45)";
+            const toLineData = (pts: { time: number; value: number }[]) =>
+              pts.map((p) => ({ time: p.time as Time, value: p.value }));
+            const authUpper = chart.addLineSeries({
+              color: authColor,
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              priceScaleId: "right",
+              visible: inst.visible,
+              title: "BOLL upper (auth)",
+              lastValueVisible: false,
+            });
+            authUpper.setData(toLineData(authoritativeBollinger.upper));
+            const authMid = chart.addLineSeries({
+              color: authColor,
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              priceScaleId: "right",
+              visible: inst.visible,
+              title: "BOLL mid (auth)",
+              lastValueVisible: false,
+            });
+            authMid.setData(toLineData(authoritativeBollinger.mid));
+            const authLower = chart.addLineSeries({
+              color: authColor,
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              priceScaleId: "right",
+              visible: inst.visible,
+              title: "BOLL lower (auth)",
+              lastValueVisible: false,
+            });
+            authLower.setData(toLineData(authoritativeBollinger.lower));
+            created.push(authUpper, authMid, authLower);
+          }
           break;
         }
         case "VWAP": {
@@ -143,11 +194,18 @@ export function useIndicators(
         }
         default:
           // RSI / MACD / ATR / STOCH — "below" types render in OscillatorPane.
+          // TODO(U10+, R5): the authoritative `rsi` column (same
+          // `mapPairCandles(...).indicators` map `authoritativeBollinger`
+          // above is picked from) could similarly be overlaid inside
+          // `OscillatorPane.tsx` for RSI instances. Not wired in this unit —
+          // scope was kept to the one preview indicator (BOLL) with a clean
+          // 1:1 authoritative column mapping on the main pane, plus the R9
+          // trade markers (see the U10 report for the full rationale).
           break;
       }
       if (created.length > 0) seriesRef.current.set(inst.iid, created);
     }
     // chartRef/candleSeriesRef are stable refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inds, chartData, isDark]);
+  }, [inds, chartData, isDark, authoritativeBollinger]);
 }

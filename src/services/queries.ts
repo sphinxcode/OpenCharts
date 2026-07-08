@@ -281,6 +281,32 @@ export function useCandles(
   });
 }
 
+/**
+ * Authoritative `/pair_candles` indicator columns (plan U10 / R5) — shares
+ * `useCandles`'s exact query key/queryFn so TanStack Query serves this from
+ * the same cache entry (no duplicate network request) when both hooks are
+ * mounted with matching args, and only selects `data.indicators` instead of
+ * `data.candles`. `indicators` is only ever populated by the Freqtrade
+ * adapter (`api.getCandlesWithMeta`); the demo backend resolves to `{}`.
+ * `enabled` should be gated by the caller (e.g. only after a backtest has
+ * completed) so this stays a no-op fetch during ordinary chart browsing.
+ */
+export function usePairIndicators(
+  symbol: string,
+  timeframe: string,
+  limit?: number,
+  replayVersion?: number,
+  enabled = true,
+) {
+  return useQuery<MarketDataCandlesPayload, Error, Record<string, { time: number; value: number }[]>>({
+    queryKey: [...queryKeys.market.candles(symbol, timeframe), limit ?? "auto", replayVersion ?? 0],
+    queryFn: () => api.getCandlesWithMeta(symbol, timeframe, limit),
+    select: (data) => data.indicators ?? {},
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 // ── Account Metrics (comprehensive single-source-of-truth) ──
 export function useAccountMetrics(accountId: string | null) {
   return useQuery({
