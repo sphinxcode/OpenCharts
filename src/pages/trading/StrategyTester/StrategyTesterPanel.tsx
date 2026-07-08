@@ -15,12 +15,14 @@ import { Overview } from "./Overview.tsx";
 import { Performance } from "./Performance.tsx";
 import { TradesList } from "./TradesList.tsx";
 import { Properties } from "./Properties.tsx";
+import { WalkForward } from "./WalkForward.tsx";
 
 export type BacktestRunStatus = "idle" | "running" | "done" | "error";
-export type TesterTab = "overview" | "performance" | "trades" | "properties";
+export type TesterTab = "overview" | "walkforward" | "performance" | "trades" | "properties";
 
 const TABS: { key: TesterTab; label: string }[] = [
   { key: "overview", label: "Overview" },
+  { key: "walkforward", label: "Walk-forward" },
   { key: "performance", label: "Performance" },
   { key: "trades", label: "List of trades" },
   { key: "properties", label: "Properties" },
@@ -113,7 +115,11 @@ export function StrategyTesterPanel({
       {/* Body */}
       {!collapsed && (
         <div className="min-h-0 flex-1 overflow-hidden">
-          {status === "error" ? (
+          {tab === "walkforward" ? (
+            // Walk-forward runs its OWN in/out-of-sample backtests, so it's
+            // available regardless of the main Run-backtest state.
+            <WalkForward strategyName={strategyName} timeframe={timeframe} />
+          ) : status === "error" ? (
             <ErrorState message={error} />
           ) : !results ? (
             status === "running" ? (
