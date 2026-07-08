@@ -187,22 +187,22 @@ export const freqtradeApi = {
       return [];
     }
   },
-  getCandlesWithMeta: async (symbol: string, timeframe: string, limit?: number) => {
+  getCandlesWithMeta: async (symbol: string, timeframe: string, limit?: number, strategy?: string) => {
     try {
       const raw = await ft.getPairHistory(
         normalizePair(symbol),
         timeframe,
-        cachedStrategy,
+        strategy || cachedStrategy,
         historyTimerange(timeframe, limit),
       );
-      // `indicators` (plan U10 / R5) carries the authoritative
-      // `populate_indicators` columns (rsi, bb_lower/mid/upper, ...) so
-      // callers can reconcile them against the client-side preview after a
-      // backtest — see `pickAuthoritativeBollinger` in ./freqtrade/mappers.ts.
-      const { candles, indicators } = mapPairCandles(raw);
+      // `indicators` = authoritative populate_indicators columns; `signals` =
+      // the strategy's enter_long/exit_long markers for the chart (TradingView
+      // style — updates when the active strategy changes).
+      const { candles, indicators, signals } = mapPairCandles(raw);
       return {
         candles,
         indicators,
+        signals,
         metadata: { isPartial: false, backfillQueued: false, historicalCoverageStart: null },
       };
     } catch (err) {
@@ -210,6 +210,7 @@ export const freqtradeApi = {
       return {
         candles: [],
         indicators: {},
+        signals: [],
         metadata: { isPartial: false, backfillQueued: false, historicalCoverageStart: null },
       };
     }

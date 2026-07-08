@@ -31,6 +31,8 @@ export interface RightPanelProps {
    * unit lands.
    */
   onEditStrategy?: () => void;
+  /** Active strategy name (from the toolbar picker). */
+  activeStrategy?: string | null;
 }
 
 const TABS: Array<{ key: StrategyPanelTab; label: string }> = [
@@ -46,7 +48,14 @@ const TABS: Array<{ key: StrategyPanelTab; label: string }> = [
  * placeholder (Elliott Wave + Harmonic card + Live-signal card) until the
  * indicator-instance store (U4+) and backtest wiring (U9+) land.
  */
-export function RightPanel({ activeTab, onTabChange, watchlist, order, onEditStrategy }: RightPanelProps) {
+export function RightPanel({
+  activeTab,
+  onTabChange,
+  watchlist,
+  order,
+  onEditStrategy,
+  activeStrategy,
+}: RightPanelProps) {
   return (
     <div className="flex h-full flex-col min-h-0">
       <div className="flex h-[38px] shrink-0 border-b border-border">
@@ -67,7 +76,7 @@ export function RightPanel({ activeTab, onTabChange, watchlist, order, onEditStr
         ))}
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
-        {activeTab === "strategy" && <StrategyTab onEditStrategy={onEditStrategy} />}
+        {activeTab === "strategy" && <StrategyTab activeStrategy={activeStrategy} onEditStrategy={onEditStrategy} />}
         {activeTab === "watchlist" && (
           <WatchlistPanel
             symbols={watchlist.symbols}
@@ -86,11 +95,18 @@ export function RightPanel({ activeTab, onTabChange, watchlist, order, onEditStr
 }
 
 /**
- * Static "Elliott Wave + Harmonic" strategy card + Live-signal card
- * (README §"Screens" region 5, "Strategy"). All figures are placeholder
- * content — no data wiring until the backtest/signal units land.
+ * Reflects the ACTIVE selected strategy (from the toolbar picker) + an honest
+ * "how to test" guide. Replaces the old hardcoded Elliott/Harmonic + fake
+ * live-signal placeholder, which was misleading (it showed regardless of what
+ * strategy was loaded, and this is a backtest lab with no live signals).
  */
-function StrategyTab({ onEditStrategy }: { onEditStrategy?: () => void }) {
+function StrategyTab({
+  activeStrategy,
+  onEditStrategy,
+}: {
+  activeStrategy?: string | null;
+  onEditStrategy?: () => void;
+}) {
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3">
       <div className="overflow-hidden rounded-lg border border-border">
@@ -99,20 +115,22 @@ function StrategyTab({ onEditStrategy }: { onEditStrategy?: () => void }) {
             className="h-2 w-2 rounded-full bg-primary"
             style={{ boxShadow: "0 0 8px hsl(var(--accent))" }}
           />
-          <span className="text-xs font-bold">Elliott Wave + Harmonic</span>
+          <span className="text-xs font-bold">{activeStrategy ?? "No strategy loaded"}</span>
           <span className="ml-auto rounded px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-primary bg-primary/20">
-            CONFLUENCE
+            PYTHON
           </span>
         </div>
         <div className="flex flex-col gap-2.5 px-3 py-2.5">
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Long when a completed harmonic (Gartley/Bat) sits in confluence with an Elliott
-            wave-2/4 retrace. Python signal → Freqtrade backtest.
+            {activeStrategy
+              ? "A Freqtrade strategy written in Python. Edit its source, pick a timeframe, then Run backtest to see how it would have performed on real BTC/USDT history."
+              : "Pick a strategy from the top toolbar to load and backtest it."}
           </p>
           <button
             type="button"
             onClick={() => onEditStrategy?.()}
-            className="mt-0.5 flex h-[30px] items-center justify-center gap-1.5 rounded-md border border-border text-[11px] hover:bg-secondary"
+            disabled={!activeStrategy}
+            className="mt-0.5 flex h-[30px] items-center justify-center gap-1.5 rounded-md border border-border text-[11px] hover:bg-secondary disabled:opacity-50"
           >
             <span className="font-mono text-primary">.py</span> Edit strategy source
           </button>
@@ -121,34 +139,26 @@ function StrategyTab({ onEditStrategy }: { onEditStrategy?: () => void }) {
 
       <div className="flex flex-col gap-1.5">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Live signal
+          How to test this strategy
         </span>
-        <div className="flex flex-col gap-2 rounded-lg border border-border bg-secondary p-3">
-          <div className="flex items-center gap-2">
-            <span className="rounded px-2 py-0.5 text-[10px] font-bold text-buy bg-buy/15">
-              LONG SETUP
-            </span>
-            <span className="text-[11px] text-muted-foreground">forming · wave 2</span>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[9px] uppercase text-muted-foreground">Entry</span>
-              <span className="font-mono text-xs font-semibold">61,240</span>
-            </div>
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[9px] uppercase text-muted-foreground">Stop</span>
-              <span className="font-mono text-xs font-semibold text-sell">59,900</span>
-            </div>
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[9px] uppercase text-muted-foreground">Target</span>
-              <span className="font-mono text-xs font-semibold text-buy">65,260</span>
-            </div>
-          </div>
-          <div className="flex items-center justify-between border-t border-border pt-1.5">
-            <span className="text-[11px] text-muted-foreground">Risk / reward</span>
-            <span className="font-mono text-xs font-bold text-primary">1 : 3.0</span>
-          </div>
-        </div>
+        <ol className="flex flex-col gap-1.5 rounded-lg border border-border bg-secondary p-3 text-[11px] text-muted-foreground">
+          <li>1. Pick a strategy in the top toolbar.</li>
+          <li>2. Choose a timeframe (1m–1w).</li>
+          <li>
+            3. Click <span className="font-semibold text-foreground">▶ Run backtest</span>.
+          </li>
+          <li>
+            4. Read the <span className="font-semibold text-foreground">Strategy Tester</span> — metrics, equity
+            curve, MET/NOT-MET.
+          </li>
+          <li>
+            5. Run <span className="font-semibold text-foreground">Walk-forward</span> to check it isn't overfit.
+          </li>
+          <li>6. Download the plain-English report.</li>
+        </ol>
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          No live trading signals — this is a backtest lab (dry-run only). Nothing risks real money.
+        </p>
       </div>
     </div>
   );

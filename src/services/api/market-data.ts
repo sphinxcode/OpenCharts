@@ -50,6 +50,8 @@ export interface MarketDataCandlesPayload {
    * and every consumer must tolerate its absence.
    */
   indicators?: Record<string, { time: number; value: number }[]>;
+  /** Strategy entry/exit signals (enter_long/exit_long) for chart markers. */
+  signals?: { time: number; kind: "enter" | "exit"; price: number; tag?: string }[];
 }
 
 export interface MarketDataTick {

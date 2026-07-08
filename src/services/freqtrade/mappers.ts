@@ -29,6 +29,15 @@ export interface MappedIndicatorPoint {
   value: number;
 }
 
+/** A strategy entry/exit signal from `/pair_history`'s enter_long/exit_long
+ *  columns — drawn on the chart as buy/sell markers (TradingView-style). */
+export interface StrategySignal {
+  time: number;
+  kind: "enter" | "exit";
+  price: number;
+  tag?: string;
+}
+
 export interface MappedCandles {
   candles: Candle[];
   /** One entry per non-OHLCV `populate_indicators` column (verified set:
@@ -36,6 +45,8 @@ export interface MappedCandles {
    *  A column absent from `columns[]` is simply absent here — never a crash
    *  (U8 test scenario: "missing columns[] entry → mapper tolerates"). */
   indicators: Record<string, MappedIndicatorPoint[]>;
+  /** Strategy entry/exit signals (enter_long/exit_long) for chart markers. */
+  signals: StrategySignal[];
 }
 
 /**
@@ -60,14 +71,29 @@ export function mapPairCandles(raw: PairHistoryResponse | null | undefined): Map
   const volumeIdx = lower.indexOf("volume");
 
   const indicators: Record<string, MappedIndicatorPoint[]> = {};
+  const signals: StrategySignal[] = [];
   if (dateIdx < 0 || openIdx < 0 || highIdx < 0 || lowIdx < 0 || closeIdx < 0) {
-    return { candles: [], indicators };
+    return { candles: [], indicators, signals };
   }
+
+  // Signal + freqtrade-internal columns: extract as markers, and keep them OUT
+  // of `indicators` so they don't draw as junk 0/1 lines.
+  const enterIdx = lower.indexOf("enter_long");
+  const exitIdx = lower.indexOf("exit_long");
+  const enterTagIdx = lower.indexOf("enter_tag");
+  const exitTagIdx = lower.indexOf("exit_tag");
+  const enterPxIdx = lower.indexOf("_enter_long_signal_close");
+  const exitPxIdx = lower.indexOf("_exit_long_signal_close");
+  const signalIdx = new Set(
+    [enterIdx, exitIdx, enterTagIdx, exitTagIdx, enterPxIdx, exitPxIdx, lower.indexOf("__date_ts")].filter(
+      (i) => i >= 0,
+    ),
+  );
 
   const coreIdx = new Set([dateIdx, openIdx, highIdx, lowIdx, closeIdx, volumeIdx].filter((i) => i >= 0));
   const indicatorCols = columns
     .map((name, idx) => ({ name, idx }))
-    .filter(({ idx }) => !coreIdx.has(idx));
+    .filter(({ idx }) => !coreIdx.has(idx) && !signalIdx.has(idx));
   for (const { name } of indicatorCols) indicators[name] = [];
 
   const candles: Candle[] = [];
@@ -87,9 +113,30 @@ export function mapPairCandles(raw: PairHistoryResponse | null | undefined): Map
       const num = typeof cell === "number" ? cell : cell == null ? NaN : Number(cell);
       if (!Number.isNaN(num)) indicators[name]!.push({ time, value: num });
     }
+
+    // Entry / exit signals → chart markers (price from the signal_close col if
+    // present, else the candle close).
+    if (enterIdx >= 0 && Number(row[enterIdx]) === 1) {
+      const px = enterPxIdx >= 0 ? Number(row[enterPxIdx]) : NaN;
+      signals.push({
+        time,
+        kind: "enter",
+        price: Number.isFinite(px) ? px : close,
+        tag: enterTagIdx >= 0 ? String(row[enterTagIdx] ?? "") : undefined,
+      });
+    }
+    if (exitIdx >= 0 && Number(row[exitIdx]) === 1) {
+      const px = exitPxIdx >= 0 ? Number(row[exitPxIdx]) : NaN;
+      signals.push({
+        time,
+        kind: "exit",
+        price: Number.isFinite(px) ? px : close,
+        tag: exitTagIdx >= 0 ? String(row[exitTagIdx] ?? "") : undefined,
+      });
+    }
   }
 
-  return { candles, indicators };
+  return { candles, indicators, signals };
 }
 
 // ── Authoritative overlay reconciliation (R5, plan U10) ─────────────────────

@@ -259,13 +259,19 @@ export function useCandles(
   timeframe: string,
   limit?: number,
   replayVersion?: number,
+  strategy?: string | null,
 ) {
   return useQuery<MarketDataCandlesPayload, Error, Candle[]>({
-    // Include replayVersion in the query key so each replay session forces a
-    // completely fresh query — React Query won't reuse structural sharing or
-    // stale cache from a previous replay / normal session.
-    queryKey: [...queryKeys.market.candles(symbol, timeframe), limit ?? "auto", replayVersion ?? 0],
-    queryFn: () => api.getCandlesWithMeta(symbol, timeframe, limit),
+    // Include replayVersion + strategy in the key so a strategy switch refetches
+    // (the strategy determines the populate_indicators columns + enter/exit
+    // signals in the /pair_history response).
+    queryKey: [
+      ...queryKeys.market.candles(symbol, timeframe),
+      limit ?? "auto",
+      replayVersion ?? 0,
+      strategy ?? "none",
+    ],
+    queryFn: () => api.getCandlesWithMeta(symbol, timeframe, limit, strategy ?? undefined),
     // Extract just the candles array for consumers — raw payload (with isPartial)
     // is still accessible via query.state.data inside refetchInterval below.
     select: (data) => data.candles,
@@ -297,12 +303,45 @@ export function usePairIndicators(
   limit?: number,
   replayVersion?: number,
   enabled = true,
+  strategy?: string | null,
 ) {
   return useQuery<MarketDataCandlesPayload, Error, Record<string, { time: number; value: number }[]>>({
-    queryKey: [...queryKeys.market.candles(symbol, timeframe), limit ?? "auto", replayVersion ?? 0],
-    queryFn: () => api.getCandlesWithMeta(symbol, timeframe, limit),
+    queryKey: [
+      ...queryKeys.market.candles(symbol, timeframe),
+      limit ?? "auto",
+      replayVersion ?? 0,
+      strategy ?? "none",
+    ],
+    queryFn: () => api.getCandlesWithMeta(symbol, timeframe, limit, strategy ?? undefined),
     select: (data) => data.indicators ?? {},
     enabled,
+    staleTime: 30_000,
+  });
+}
+
+/** Strategy entry/exit signals (enter_long/exit_long) for chart markers —
+ *  shares useCandles' exact query key so it's served from the same cache
+ *  entry (no extra request). Updates when the active strategy changes. */
+export function useStrategySignals(
+  symbol: string,
+  timeframe: string,
+  limit?: number,
+  replayVersion?: number,
+  strategy?: string | null,
+) {
+  return useQuery<
+    MarketDataCandlesPayload,
+    Error,
+    NonNullable<MarketDataCandlesPayload["signals"]>
+  >({
+    queryKey: [
+      ...queryKeys.market.candles(symbol, timeframe),
+      limit ?? "auto",
+      replayVersion ?? 0,
+      strategy ?? "none",
+    ],
+    queryFn: () => api.getCandlesWithMeta(symbol, timeframe, limit, strategy ?? undefined),
+    select: (data) => data.signals ?? [],
     staleTime: 30_000,
   });
 }

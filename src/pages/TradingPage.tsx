@@ -30,6 +30,7 @@ import {
   useOrders,
   usePairIndicators,
   usePositions,
+  useStrategySignals,
   useSymbols,
   useUpdateJournalEntry,
 } from "../services/queries.ts";
@@ -534,10 +535,20 @@ export function TradingPage() {
     candleLimit,
     replayVersion,
     backtestStatus === "done",
+    activeStrategyName,
   );
   const authoritativeBollinger = useMemo(
     () => (pairIndicators ? pickAuthoritativeBollinger(pairIndicators) : null),
     [pairIndicators],
+  );
+  // Strategy entry/exit signals on the chart (TradingView-style) — updates
+  // when the active strategy changes.
+  const { data: strategySignals = [] } = useStrategySignals(
+    selectedSymbol,
+    timeframe,
+    candleLimit,
+    replayVersion,
+    activeStrategyName,
   );
 
   // Run backtest (toolbar ▶ button, plan U9): POST /backtest -> poll
@@ -736,6 +747,7 @@ export function TradingPage() {
               onClearIndicators={handleClearIndicators}
               onOpenIndicatorSettings={handleOpenIndicatorSettings}
               backtestTrades={backtestResults?.trades}
+              strategySignals={strategySignals}
               authoritativeBollinger={authoritativeBollinger}
             />
           </div>
@@ -845,6 +857,7 @@ export function TradingPage() {
                   },
                 }}
                 onEditStrategy={handleEditStrategy}
+                activeStrategy={activeStrategyName}
               />
             ) : (
               <>

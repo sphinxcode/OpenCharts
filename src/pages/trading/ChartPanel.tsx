@@ -275,6 +275,12 @@ export interface ChartPanelProps {
    */
   backtestTrades?: RawTrade[];
   /**
+   * The active strategy's raw enter_long/exit_long signals (from
+   * /pair_history) — drawn as buy/sell arrows on the chart, TradingView-style,
+   * so you see the trades the strategy would take just by selecting it.
+   */
+  strategySignals?: { time: number; kind: "enter" | "exit"; price: number; tag?: string }[];
+  /**
    * Authoritative Bollinger columns from the backtest's `/pair_candles`
    * response (plan U10 / R5), drawn dashed over any BOLL preview instance.
    * `undefined`/`null` (no backtest yet, or the strategy has no Bollinger
@@ -953,6 +959,24 @@ function buildBacktestMarkers(
   return markers;
 }
 
+/** Raw strategy enter_long/exit_long signals → small buy/sell arrows on the
+ *  chart (TradingView-style). `time` is epoch **seconds** (from mapPairCandles);
+ *  getCandleBucketTime expects ms. Drawn subtly (no text) since there can be
+ *  many, so they don't drown out the labeled backtest-trade markers. */
+function buildStrategySignalMarkers(
+  signals: { time: number; kind: "enter" | "exit"; price: number }[] | undefined,
+  timeframe: Timeframe,
+  colors: ChartColors,
+): SeriesMarker<Time>[] {
+  if (!signals || signals.length === 0) return [];
+  return signals.map((s) => ({
+    time: getCandleBucketTime(s.time * 1000, timeframe) as Time,
+    position: s.kind === "enter" ? "belowBar" : "aboveBar",
+    color: s.kind === "enter" ? colors.up : colors.down,
+    shape: s.kind === "enter" ? "arrowUp" : "arrowDown",
+  }));
+}
+
 // ── HUD presentational sub-components ────────────────────────────────────────
 // Extracted so the legend's per-value colour ternaries live here instead of
 // inflating the ChartPanel render function's cognitive complexity.
@@ -1203,6 +1227,7 @@ export function ChartPanel({
   onOpenIndicatorSettings,
   isReplaying = false,
   backtestTrades,
+  strategySignals,
   authoritativeBollinger,
 }: ChartPanelProps) {
   const queryClient = useQueryClient();
@@ -1521,14 +1546,21 @@ export function ChartPanel({
         if (marker) markers.push(marker);
       }
     }
-    markers.push(...buildBacktestMarkers(backtestTrades, timeframe, colors));
+    // After a backtest, show its actual trades (labeled). Otherwise show the
+    // selected strategy's raw enter/exit signals so picking a strategy draws
+    // its would-be trades on the chart immediately (TradingView-style).
+    if (backtestTrades && backtestTrades.length > 0) {
+      markers.push(...buildBacktestMarkers(backtestTrades, timeframe, colors));
+    } else {
+      markers.push(...buildStrategySignalMarkers(strategySignals, timeframe, colors));
+    }
     // lightweight-charts requires markers sorted by time ascending
     markers.sort((a, b) => (a.time as number) - (b.time as number));
     series.setMarkers(markers);
     return () => {
       series.setMarkers([]);
     };
-  }, [replayTradeEvents, backtestTrades, timeframe, colors]);
+  }, [replayTradeEvents, backtestTrades, strategySignals, timeframe, colors]);
 
   // ── Candle close countdown timer ───────────────────────────
   useEffect(() => {
