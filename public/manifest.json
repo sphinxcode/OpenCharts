@@ -1,7 +1,7 @@
 {
-  "name": "OpenCharts",
-  "short_name": "OpenCharts",
-  "description": "Open-source trading terminal — advanced charts, drawing tools, and paper trading.",
+  "name": "Trading Lab",
+  "short_name": "Trading Lab",
+  "description": "Python-native charting and backtest terminal (Freqtrade).",
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",
