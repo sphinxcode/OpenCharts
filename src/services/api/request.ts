@@ -1,10 +1,26 @@
-/** Thin HTTP client for the PropSim API */
+/**
+ * Thin HTTP client — timeout, Bearer attach, single-flight 401→refresh retry.
+ *
+ * Originally built for a PropSim-style `/api` backend (see the still-present
+ * but currently-unused `accountsApi`/`marketdataApi`/`journalApi`/`authApi`
+ * modules in this directory, called only by the dormant PropSim query hooks
+ * in `services/queries.ts` — see the Trading Lab plan's "PropSim residue"
+ * note, deferred/ignored). Trading Lab (U8) repoints this plumbing at the
+ * verified Freqtrade webserver contract instead: base `/api/v1`, and the
+ * 401→refresh interceptor now speaks Freqtrade's `POST /token/refresh`
+ * (`Authorization: Bearer <refresh_token>`, no body) rather than the old
+ * PropSim `/auth/refresh` JSON-body shape. Those PropSim modules already had
+ * no live backend to talk to (nothing here regresses them further — see
+ * `docs/plans/2026-07-08-001-feat-trading-lab-terminal-plan.md` U8).
+ */
 import { toast as globalToast } from "../toast.ts";
 
-/** API base URL — uses VITE_API_URL env var (for direct gateway access) or /api (nginx proxy) */
+/** API base URL — uses VITE_API_URL env var (Freqtrade webserver origin) or
+ *  falls back to a relative `/api/v1` (harmless 404s when unset, e.g. local
+ *  dev without a `.env`). See `docs/plans/VERIFIED-API-CONTRACT.md`. */
 export const API_BASE = import.meta.env.VITE_API_URL
-  ? `${import.meta.env.VITE_API_URL.replace(/\/$/, "")}/api`
-  : "/api";
+  ? `${import.meta.env.VITE_API_URL.replace(/\/$/, "")}/api/v1`
+  : "/api/v1";
 
 const BASE = API_BASE;
 
@@ -29,25 +45,26 @@ async function tryTokenRefresh(): Promise<string | null> {
   _refreshPromise = (async () => {
     const rt = localStorage.getItem("refresh_token");
     if (!rt) return null;
-    // Give the refresh its own 10 s deadline so a slow /auth/refresh
+    // Give the refresh its own 10 s deadline so a slow /token/refresh
     // can't hold any caller past its own timeoutMs.
     const refreshController = new AbortController();
     const refreshTid = setTimeout(() => refreshController.abort(), 10_000);
     try {
-      const res = await fetch(`${BASE}/auth/refresh`, {
+      // Freqtrade contract (verified): POST /token/refresh with the refresh
+      // token as a Bearer header — no JSON body, no refresh-token rotation.
+      const res = await fetch(`${BASE}/token/refresh`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: rt }),
+        headers: { Authorization: `Bearer ${rt}` },
         signal: refreshController.signal,
       });
       clearTimeout(refreshTid);
       if (!res.ok) return null;
       const json = await res.json().catch(() => null);
-      const data = json?.data ?? json;
-      if (!data?.accessToken) return null;
-      localStorage.setItem("access_token", data.accessToken);
-      if (data.refreshToken) localStorage.setItem("refresh_token", data.refreshToken);
-      return data.accessToken as string;
+      // Freqtrade returns the token envelope directly (no `.data` wrapper).
+      const accessToken = json?.access_token as string | undefined;
+      if (!accessToken) return null;
+      localStorage.setItem("access_token", accessToken);
+      return accessToken;
     } catch {
       return null;
     } finally {
@@ -71,7 +88,16 @@ async function resolveResponse<T>(res: Response): Promise<T> {
     // (e.g. "Invalid email address") instead of the generic "Request validation failed."
     const fieldErrors = (err.details?.validation?.fieldErrors ?? {}) as Record<string, string[]>;
     const firstFieldMessage = Object.values(fieldErrors).flat()[0];
-    const message = firstFieldMessage || err.message || res.statusText;
+    // FastAPI (Freqtrade) error shape is `{detail: string | Array<{msg,...}>}`,
+    // not this client's original `{error:{code,message}}` shape — fall back
+    // to it so 401/422 responses surface something readable.
+    const detail = json?.detail;
+    const detailMessage = Array.isArray(detail)
+      ? detail.map((d) => (typeof d?.msg === "string" ? d.msg : JSON.stringify(d))).join("; ")
+      : typeof detail === "string"
+        ? detail
+        : undefined;
+    const message = firstFieldMessage || err.message || detailMessage || res.statusText;
     throw new ApiError(res.status, code, message, err.details);
   }
   return json?.data ?? json;
