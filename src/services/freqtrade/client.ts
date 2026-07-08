@@ -153,6 +153,24 @@ export const getPairCandles = (pair: string, timeframe: string, limit?: number) 
   return request<PairHistoryResponse>(`/pair_candles?${params.toString()}`);
 };
 
+/**
+ * Chart data in **webserver mode**. `/pair_candles` only works with a running
+ * bot ("Bot is not in the correct state" otherwise) — verified against the live
+ * backend — so the terminal fetches history via `/pair_history`, which runs the
+ * strategy's populate_indicators on demand and returns OHLCV **plus** the
+ * authoritative indicator columns (rsi, vol_avg, bb_lower/mid/upper).
+ * `timerange` is Freqtrade format: `YYYYMMDD-YYYYMMDD` (either bound optional).
+ */
+export const getPairHistory = (
+  pair: string,
+  timeframe: string,
+  strategy: string,
+  timerange: string,
+) => {
+  const params = new URLSearchParams({ pair, timeframe, strategy, timerange });
+  return request<PairHistoryResponse>(`/pair_history?${params.toString()}`);
+};
+
 export interface StrategiesResponse {
   strategies: string[];
 }

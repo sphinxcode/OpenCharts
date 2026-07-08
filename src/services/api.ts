@@ -91,6 +91,39 @@ function guestCredentials(): { username: string; password: string } | null {
   return u && p ? { username: u, password: p } : null;
 }
 
+// `/pair_history` needs a strategy + timerange. Cache the box's strategy
+// (getStrategies refreshes it) and the available pairs (getSymbols refreshes
+// them) so getCandles can resolve both without extra round-trips.
+let cachedStrategy = "RSIVolume";
+let cachedPairs: string[] = [];
+
+/** Map a UI symbol to a valid Freqtrade pair. The demo store defaults to
+ *  "BTCUSD"; the backend pair is "BTC/USDT". Unknown → first available pair. */
+function normalizePair(symbol: string): string {
+  if (cachedPairs.includes(symbol)) return symbol;
+  const slashed = symbol.includes("/")
+    ? symbol
+    : symbol.replace(/^([A-Za-z]+?)(USDT|USDC|USD|BTC|ETH)$/i, "$1/$2");
+  if (cachedPairs.includes(slashed)) return slashed;
+  return cachedPairs[0] ?? slashed;
+}
+
+/** Freqtrade `YYYYMMDD-YYYYMMDD` timerange for ~`limit` recent candles
+ *  (default 1500). Runs in the browser, so Date is available. */
+function historyTimerange(timeframe: string, limit?: number): string {
+  const tfMin =
+    ({ "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080 } as Record<
+      string,
+      number
+    >)[timeframe] ?? 60;
+  const candles = limit && limit > 0 ? limit : 1500;
+  const spanMs = candles * tfMin * 60_000;
+  const fmt = (d: Date) =>
+    `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
+  const end = new Date();
+  return `${fmt(new Date(end.getTime() - spanMs))}-${fmt(end)}`;
+}
+
 export const freqtradeApi = {
   ...demoApi,
 
@@ -133,6 +166,7 @@ export const freqtradeApi = {
   getSymbols: async (): Promise<Symbol[]> => {
     try {
       const res = await ft.getAvailablePairs();
+      cachedPairs = res.pairs;
       return res.pairs.map(pairToSymbol);
     } catch (err) {
       console.warn("[freqtradeApi] getSymbols failed — offline.", err);
@@ -141,7 +175,12 @@ export const freqtradeApi = {
   },
   getCandles: async (symbol: string, timeframe: string, limit?: number) => {
     try {
-      const raw = await ft.getPairCandles(symbol, timeframe, limit);
+      const raw = await ft.getPairHistory(
+        normalizePair(symbol),
+        timeframe,
+        cachedStrategy,
+        historyTimerange(timeframe, limit),
+      );
       return mapPairCandles(raw).candles;
     } catch (err) {
       console.warn("[freqtradeApi] getCandles failed — offline.", err);
@@ -150,7 +189,12 @@ export const freqtradeApi = {
   },
   getCandlesWithMeta: async (symbol: string, timeframe: string, limit?: number) => {
     try {
-      const raw = await ft.getPairCandles(symbol, timeframe, limit);
+      const raw = await ft.getPairHistory(
+        normalizePair(symbol),
+        timeframe,
+        cachedStrategy,
+        historyTimerange(timeframe, limit),
+      );
       // `indicators` (plan U10 / R5) carries the authoritative
       // `populate_indicators` columns (rsi, bb_lower/mid/upper, ...) so
       // callers can reconcile them against the client-side preview after a
@@ -172,7 +216,12 @@ export const freqtradeApi = {
   },
   getTick: async (symbol: string) => {
     try {
-      const raw = await ft.getPairCandles(symbol, "1m", 1);
+      const raw = await ft.getPairHistory(
+        normalizePair(symbol),
+        "1h",
+        cachedStrategy,
+        historyTimerange("1h", 24),
+      );
       const { candles } = mapPairCandles(raw);
       const last = candles[candles.length - 1];
       const price = last?.close ?? 0;
@@ -188,6 +237,7 @@ export const freqtradeApi = {
   getStrategies: async (): Promise<string[]> => {
     try {
       const res = await ft.getStrategies();
+      if (res.strategies[0]) cachedStrategy = res.strategies[0];
       return res.strategies;
     } catch (err) {
       console.warn("[freqtradeApi] getStrategies failed — offline.", err);
