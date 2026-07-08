@@ -9,7 +9,7 @@ import {
 } from "lightweight-charts";
 import { Eye, EyeOff, Settings, X } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
-import { atr, macd, rsi, stochastic, volumeWithAvg } from "../../lib/indicators.ts";
+import { atr, macd, rsi, stochastic } from "../../lib/indicators.ts";
 import { formatIndicatorLabel } from "../../services/freqtrade/catalog.ts";
 import { type Indicator, useIndicatorStore } from "../../services/indicatorStore.ts";
 import { cn } from "../../lib/utils.ts";
@@ -21,6 +21,9 @@ export interface OscillatorPaneProps {
    *  (one shared timeline, TradingView-style). */
   mainChartRef: React.RefObject<IChartApi | null>;
   chartData: CandlestickData<Time>[];
+  /** Per-candle volume — chartData strips volume, so the VOLUME oscillator
+   *  needs it passed separately. */
+  volumeData: { time: Time; value: number }[];
   /** Full instance list — filtered to `plot === 'below'` internally. */
   inds: Indicator[];
   isDark: boolean;
@@ -94,6 +97,7 @@ function OscLegendRow({
 export function OscillatorPane({
   mainChartRef,
   chartData,
+  volumeData,
   inds,
   isDark,
   onOpenSettings,
@@ -103,6 +107,10 @@ export function OscillatorPane({
   // every unrelated ChartPanel re-render (ticks, legend state, etc.), which
   // would otherwise thrash the oscillator series on every parent render.
   const belowInds = useMemo(() => inds.filter((i) => i.plot === "below"), [inds]);
+  // The pane renders `null` (no container) when empty, so the create-chart
+  // effect MUST re-run when this flips false→true — otherwise the container
+  // that appears when the first below-indicator is added never gets a chart.
+  const hasBelow = belowInds.length > 0;
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<Map<string, AnySeries[]>>(new Map());
@@ -193,10 +201,10 @@ export function OscillatorPane({
       chartRef.current = null;
       seriesRef.current.clear();
     };
-    // Recreated on theme toggle, matching the main chart's own convention
-    // (ChartPanel's create-effect also depends on `isDark`).
+    // Recreated on theme toggle, AND when the pane first appears (hasBelow
+    // false→true) so the freshly-rendered container actually gets a chart.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark]);
+  }, [isDark, hasBelow]);
 
   // ── Render below-plot indicator series ──
   useEffect(() => {
@@ -233,11 +241,12 @@ export function OscillatorPane({
             visible: inst.visible,
           });
           // Fixed 0-100 scale so the 30/50/70 guides always sit at consistent
-          // heights regardless of the visible RSI range (method, not a
-          // constructor option, per lightweight-charts@4.2's ISeriesApi).
-          s.autoscaleInfoProvider(() => ({
-            priceRange: { minValue: 0, maxValue: 100 },
-          }));
+          // heights regardless of the visible RSI range. `autoscaleInfoProvider`
+          // is a series OPTION (via applyOptions), NOT a callable method —
+          // calling it as a method throws "autoscaleInfoProvider is not a function".
+          s.applyOptions({
+            autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+          });
           s.setData(data.map((p) => ({ time: p.time as Time, value: p.value })));
           // 30/50/70 guide lines (design README §3).
           for (const level of [30, 50, 70]) {
@@ -305,7 +314,9 @@ export function OscillatorPane({
             priceScaleId: scaleId,
             visible: inst.visible,
           });
-          kLine.autoscaleInfoProvider(() => ({ priceRange: { minValue: 0, maxValue: 100 } }));
+          kLine.applyOptions({
+            autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+          });
           kLine.setData(data.k.map((p) => ({ time: p.time as Time, value: p.value })));
           const dLine = chart.addLineSeries({
             color: "#ff7043",
@@ -332,19 +343,26 @@ export function OscillatorPane({
         }
         case "VOLUME": {
           const period = Number(inst.params.period ?? 20);
-          const { volume, avg } = volumeWithAvg(indCandles, period);
           const histo = chart.addHistogramSeries({
             priceScaleId: scaleId,
             visible: inst.visible,
           });
-          histo.setData(volume.map((p) => ({ time: p.time as Time, value: p.value })));
+          histo.setData(volumeData.map((p) => ({ time: p.time, value: p.value })));
+          // Rolling average of the real volume (chartData has none).
+          const avg: { time: Time; value: number }[] = [];
+          for (let i = 0; i < volumeData.length; i++) {
+            const start = Math.max(0, i - period + 1);
+            let sum = 0;
+            for (let j = start; j <= i; j++) sum += volumeData[j]!.value;
+            avg.push({ time: volumeData[i]!.time, value: sum / (i - start + 1) });
+          }
           const avgLine = chart.addLineSeries({
             color: "#e0a52e",
             lineWidth: 1,
             priceScaleId: scaleId,
             visible: inst.visible,
           });
-          avgLine.setData(avg.map((p) => ({ time: p.time as Time, value: p.value })));
+          avgLine.setData(avg);
           created.push(histo, avgLine);
           break;
         }
@@ -354,7 +372,7 @@ export function OscillatorPane({
       if (created.length > 0) seriesRef.current.set(inst.iid, created);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [belowInds, chartData, isDark]);
+  }, [belowInds, chartData, volumeData, isDark]);
 
   if (belowInds.length === 0) return null;
 

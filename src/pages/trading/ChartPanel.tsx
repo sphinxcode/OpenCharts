@@ -2246,6 +2246,7 @@ export function ChartPanel({
       <OscillatorPane
         mainChartRef={chartRef}
         chartData={chartData}
+        volumeData={volumeData}
         inds={inds}
         isDark={isDark}
         onOpenSettings={onOpenIndicatorSettings ?? noopOpenIndicatorSettings}
