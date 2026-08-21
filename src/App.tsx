@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { Route, Routes } from "react-router-dom";
 import { TradingPage } from "./pages/TradingPage.tsx";
+import { WavesPage } from "./pages/waves/WavesPage.tsx";
 import { useAuthStore, useTradingStore } from "./services/store.tsx";
 
 /**
@@ -32,13 +34,19 @@ export function App() {
     };
   }, [demoLogin, loadSymbols, loadAccounts]);
 
-  if (!ready) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[#0a0a0a] text-neutral-400">
-        Loading OpenCharts…
-      </div>
-    );
-  }
+  // /waves is a static-feed dashboard — it renders without the trading boot.
+  const terminal = ready ? (
+    <TradingPage />
+  ) : (
+    <div className="flex h-screen w-screen items-center justify-center bg-[#0a0a0a] text-neutral-400">
+      Loading OpenCharts…
+    </div>
+  );
 
-  return <TradingPage />;
+  return (
+    <Routes>
+      <Route path="/waves" element={<WavesPage />} />
+      <Route path="*" element={terminal} />
+    </Routes>
+  );
 }
